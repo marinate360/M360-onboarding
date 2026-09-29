@@ -1,126 +1,87 @@
+"use client";
 
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import AdminDashboard from "@/src/components/AdminDashboard";
+import StaffDashboard from "@/src/components/StaffDashboard";
+import CustomerDashboard from "@/src/components/CustomerDashboard";
+import { getCurrentProfile, type AppProfile } from "@/src/app/actions/profiles";
+import { supabase } from "@/src/lib/supabase/client";
+import { clearAuthSession, getAuthSession, saveAuthSession } from "@/src/lib/auth-storage";
 
-'use client'; 
+export default function DashboardPage() {
+  const router = useRouter();
+  const [profile, setProfile] = useState<AppProfile | null>(null);
+  const [accessToken, setAccessToken] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-import { useEffect, useState, JSX } from 'react';
-import { useRouter } from 'next/navigation';
-import AdminDashboard from '../../components/AdminDashboard'; 
-import CustomerDashboard from '../../components/CustomerDashboard'; 
+  useEffect(() => {
+    async function loadProfile() {
+      const { data } = await supabase.auth.getSession();
+      const session = getAuthSession();
+      const token = data.session?.access_token || session.accessToken || "";
 
+      if (!token) {
+        router.push("/login");
+        return;
+      }
 
-interface User {
-    id: number;
-    username: string;
-    email: string;
-    role?: {
-        id: number;
-        name: string; 
-    };
-}
+      const result = await getCurrentProfile(token);
+      if (!result.ok) {
+        setError(result.error);
+        setLoading(false);
+        return;
+      }
 
-const DASHBOARD_URL = 'https://onboarding-apis.app.f2c.io'; 
-
-export default function Dashboard(): JSX.Element {
-    const router = useRouter();
-    const [user, setUser] = useState<User | null>(null);
-    const [role, setRole] = useState<string | null>(null); 
-    const [loading, setLoading] = useState<boolean>(true);
-    const [error, setError] = useState<string>('');
-
-    useEffect(() => {
-        checkAuthAndRole();
-    }, []);
-
-    const checkAuthAndRole = (): void => {
-        setLoading(true);
-        setError('');
-
-        const jwt = localStorage.getItem('jwt') || sessionStorage.getItem('jwt');
-        const userDataString = localStorage.getItem('user') || sessionStorage.getItem('user');
-
-        if (!jwt || !userDataString) {
-            console.error('Auth token or user data missing.');
-            router.push('/login'); 
-            setLoading(false);
-            return;
-        }
-
-        try {
-            const parsedUser: User = JSON.parse(userDataString);
-            setUser(parsedUser);
-
-            const roleName = parsedUser.role?.name?.toLowerCase() || 'unknown';
-            setRole(roleName);
-
-            console.log('User Role Identified:', roleName);
-
-        } catch (e) {
-            console.error('Failed to parse user data:', e);
-            setError('Failed to parse user information.');
-            router.push('/login');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleLogout = (): void => {
-        localStorage.removeItem('jwt');
-        localStorage.removeItem('user');
-        sessionStorage.removeItem('jwt');
-        sessionStorage.removeItem('user');
-        router.push('/login');
-    };
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
-                    <p className="mt-4 text-gray-600">Loading dashboard...</p>
-                </div>
-            </div>
-        );
+      saveAuthSession(token, result.data, true);
+      setAccessToken(token);
+      setProfile(result.data);
+      setLoading(false);
     }
 
-    if (error) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="text-center">
-                    <p className="text-red-500">{error}</p>
-                    <button
-                        onClick={() => router.push('/login')}
-                        className="mt-4 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition"
-                    >
-                        Go to Login
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    loadProfile();
+  }, [router]);
 
-    // const AdminComp: any = AdminDashboard;
-    // const CustomerComp: any = CustomerDashboard;
-    const AdminComp: React.ComponentType<{ onLogout: () => void }> = AdminDashboard;
-    const CustomerComp: React.ComponentType<{ onLogout: () => void }> = CustomerDashboard;
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    clearAuthSession();
+    router.push("/login");
+  }
 
-    if (role === 'admin') { 
-        return <AdminComp onLogout={handleLogout} />;
-    } else if (role === 'customer') { 
-        return <CustomerComp onLogout={handleLogout} />;
-    } else {
-        
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                <div className="text-center">
-                    <p className="text-red-500">Access Denied: Unknown or unauthorized role.</p>
-                    <button
-                        onClick={handleLogout}
-                        className="mt-4 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition"
-                    >
-                        Logout
-                    </button>
-                </div>
-            </div>
-        );
-    }
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-orange-50">
+        <div className="text-center">
+          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-orange-200 border-t-orange-500" />
+          <p className="mt-4 text-sm font-medium text-zinc-600">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !profile) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-orange-50 px-4">
+        <div className="max-w-md rounded-2xl bg-white p-6 text-center shadow-lg">
+          <h1 className="text-xl font-bold text-zinc-950">Could not open dashboard</h1>
+          <p className="mt-2 text-sm text-zinc-600">{error || "Profile not found."}</p>
+          <button onClick={handleLogout} className="mt-5 rounded-lg bg-orange-500 px-5 py-2.5 font-semibold text-white">
+            Sign in again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const roleNormalized = (profile.role || "").trim().toLowerCase().replace(/-/g, "_");
+  if (roleNormalized === "super_admin") {
+    return <AdminDashboard accessToken={accessToken} profile={profile} onLogout={handleLogout} />;
+  }
+
+  if (roleNormalized === "staff") {
+    return <StaffDashboard accessToken={accessToken} profile={profile} onLogout={handleLogout} />;
+  }
+
+  return <CustomerDashboard accessToken={accessToken} profile={profile} onLogout={handleLogout} />;
 }

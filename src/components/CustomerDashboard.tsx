@@ -1,1406 +1,2604 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
-import Image from 'next/image';
-import { JSX,useCallback, useEffect, useState } from 'react';
-const STRAPI_URL = 'https://onboarding-apis.app.f2c.io';
+"use client";
 
-interface MediaFile {
-    id: number;
-    documentId: string;
-    url: string;
-    name: string;
-    ext: string;
-    mime: string;
-    size: number;
-}
+import React, { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
+import {
+  useRouter } from "next/navigation";
+import {
+  Building2,
+  Store,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  FileText,
+  ExternalLink,
+  Copy,
+  Check,
+  ChevronDown,
+  Plus,
+  ArrowLeft,
+  Globe,
+  Terminal,
+  MapPin,
+  Phone,
+  Mail,
+  FileCheck,
+  Lock,
+  Upload,
+  Trash2,
+  Eye,
+  EyeOff,
+  X,
+  Layers,
+  Search,
+  LogOut,
+  Utensils,
+  CreditCard,
+  ShieldCheck,
+  AlertTriangle,
+  Sun,
+  Moon,
+  Sparkles,
+  User,
+  KeyRound,
+  ArrowRight,
+  Pencil
+} from "lucide-react";
+import {
+  getMyOnboardingApplications,
+  updateMyOnboardingApplicationWithFormData,
+  type OnboardingApplication,
+} from "@/src/app/actions/onboarding-applications";
+import {
+  getMyRestaurants,
+  updateRestaurantWithFormData,
+  type RestaurantRecord,
+} from "@/src/app/actions/restaurants";
+import { clearAuthSession } from "@/src/lib/auth-storage";
+import AccountSettingsView from "@/src/components/admin/AccountSettingsView";
+import type { AppProfile } from "@/src/app/actions/profiles";
 
-interface TimeSlot {
-    open_time: string;
-    close_time: string;
-}
+const PACKAGES = {
+  "marinate-menu": {
+    label: "Marinate Menu",
+    badge: "Digital QR Menu",
+    services: ["dine_in", "takeaway"],
+    summary: "A clean QR menu and takeaway-ready setup for restaurants that want to go digital fast.",
+    points: ["Unlimited QR code menu", "Easy menu management", "Customer self-service menu"],
+  },
+  "marinate-dinein": {
+    label: "Marinate Dine",
+    badge: "Table Operations",
+    services: ["dine_in", "takeaway"],
+    summary: "Table operations, KOT flow, waiter workflow, and dine-in focused ordering.",
+    points: ["Table management", "Kitchen order tickets", "Shared order access"],
+  },
+  marinate360: {
+    label: "Marinate 360",
+    badge: "Full Suite",
+    services: ["dine_in", "delivery", "takeaway", "catering"],
+    summary: "The complete operating package for dine-in, delivery, takeaway, and catering.",
+    points: ["Delivery and takeaway management", "Reservations and catering", "Analytics and reports"],
+  },
+  "marinate-foodtruck": {
+    label: "Marinate Foodtruck",
+    badge: "Fast Counter",
+    services: ["dine_in", "takeaway"],
+    summary: "Built for food trucks and fast counter setups with instant QR menus and quick takeaway flow.",
+    points: ["Quick counter & takeaway ordering", "Mobile QR menu & digital payments", "Fast kitchen tickets & simple workflow"],
+  },
+} as const;
 
-interface Timings {
-    hours: { [key: string]: TimeSlot[] };
-}
+const STANDARD_CUISINES = [
+  "North Indian",
+  "South Indian",
+  "Chinese",
+  "Italian",
+  "Mexican",
+  "Thai",
+  "Continental",
+  "Fast Food",
+  "Biryani",
+  "Pizza",
+  "Desserts",
+  "Cafe",
+  "Street Food",
+  "Seafood",
+  "BBQ",
+];
 
-interface OnboardingRecord {
-    id: number;
-    documentId: string;
-    restaurant_name: string;
-    fullname: string;
-    email: string;
-    phone: string;
-    restaurant_primary_contact: string;
-    buildingno: string;
-    floor: string;
-    area: string;
-    city: string;
-    state: string;
-    pincode: string;
-    landmark: string;
-    address: string;
-    pan_number: string;
-    fullnameaspan: string;
-    gst: boolean;
-    gst_number: string | null;
-    fssai_number: string;
-    fssai_expiry: string;
-    bank_accno: string;
-    ifsc_code: string;
-    account_type: string;
-    application_status: boolean;
-    timings: Timings;
-    delivery_timings: Timings;
-    takeaway_timings: Timings;
-    cuisines: string;
-    services: string;
-    package: string;
-    pan_card: MediaFile | null;
-    fssai_license: MediaFile | null;
-    gst_certificate: MediaFile | null;
-    logo_url: MediaFile | null;
-    background_image_url: MediaFile | null;
-    createdAt: string;
-    updatedAt: string;
-}
+type UnifiedOutlet = {
+  id: string;
+  name: string;
+  domainName: string;
+  domainUrl: string;
+  posDomain: string;
+  isLive: boolean;
+  status: "active" | "pending" | "rejected";
+  statusLabel: string;
+  applicationId?: string;
+  restaurantId?: string;
+  package: string;
+  services: string[];
+  cuisines: string[];
+  phone: string;
+  email: string;
+  address: {
+    buildingno?: string;
+    floor?: string;
+    area?: string;
+    city?: string;
+    pincode?: string;
+    landmark?: string;
+    registered_business_address?: string;
+  };
+  legal: {
+    pan_number?: string;
+    fullnameaspan?: string;
+    gst?: boolean;
+    gst_number?: string;
+    fssai_number?: string;
+    fssai_expiry?: string;
+  };
+  bank: {
+    bank_accno?: string;
+    ifsc_code?: string;
+    account_type?: string;
+  };
+  timings?: {
+    hours?: Record<string, Array<{ open_time: string; close_time: string }>>;
+  };
+  images: Record<string, { public_url?: string; original_name?: string }>;
+  documents: Record<string, { public_url?: string; original_name?: string }>;
+  rawApplication?: OnboardingApplication;
+  rawRestaurant?: RestaurantRecord;
+};
 
-interface EditFormData {
-    restaurant_name: string;
-    fullname: string;
-    email: string;
-    phone: string;
-    restaurant_primary_contact: string;
-    buildingno: string;
-    floor: string;
-    area: string;
-    city: string;
-    pincode: string;
-    landmark: string;
-    address: string;
-    pan_number: string;
-    fullnameaspan: string;
-    gst: boolean;
-    gst_number: string;
-    fssai_number: string;
-    fssai_expiry: string;
-    bank_accno: string;
-    ifsc_code: string;
-    account_type: string;
-    timings: Timings;
-    delivery_timings: Timings;
-    takeaway_timings: Timings;
-    cuisines: string[];
-    services: string[];
-    logo_url: MediaFile | null;
-    background_image_url: MediaFile | null;
-    pan_card: MediaFile | null;
-    fssai_license: MediaFile | null;
-    gst_certificate: MediaFile | null;
-}
-
-type FileUploadField = "logo_url" | "background_image_url" | "pan_card" | "fssai_license" | "gst_certificate";
-
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const CUISINES = ["North Indian", "South Indian", "Chinese", "Italian", "Mexican", "Thai", "Continental", "Fast Food", "Biryani", "Pizza", "Desserts", "Cafe", "Street Food", "Seafood", "BBQ"];
-
-export default function CustomerDashboard() {
-    const [user, setUser] = useState<any>(null);
-    const [record, setRecord] = useState<OnboardingRecord | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [isEditing, setIsEditing] = useState(false);
-    const [editFormData, setEditFormData] = useState<EditFormData>({} as EditFormData);
-    const [fileUploads, setFileUploads] = useState<Record<string, File | null>>({});
-    const [filesToDelete, setFilesToDelete] = useState<Set<string>>(new Set());
-    const [showDetailModal, setShowDetailModal] = useState(false);
-    const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' } | null>(null);
-
-    useEffect(() => {
-        checkAuth();
-    }, []);
-
-
-        const fetchRecord =useCallback( async () => {
-        setLoading(true);
-        setError('');
-        try {
-            const jwt = localStorage.getItem('jwt') || sessionStorage.getItem('jwt');
-            if (!jwt) throw new Error('Authentication token missing.');
-            const userEmail = user?.email;
-            if (!userEmail) throw new Error('User email not found.');
-            const query = `${STRAPI_URL}/api/onboardapis?filters[email][$eq]=${encodeURIComponent(userEmail)}&populate=*`;
-            const response = await fetch(query, {
-                headers: { Authorization: `Bearer ${jwt}` },
-            });
-            if (!response.ok) {
-                if (response.status === 401) {
-                    window.location.href = '/login';
-                    return;
-                }
-                throw new Error('Failed to fetch your application record.');
-            }
-            const data = await response.json();
-            if (data.data && data.data.length > 0) {
-                setRecord(data.data[0]);
-            } else {
-                setRecord(null);
-            }
-        } catch (err) {
-            console.error('Error fetching record:', err);
-            setError(err instanceof Error ? err.message : 'Failed to load your application details.');
-        } finally {
-            setLoading(false);
-        }
-    },[user]);
-
-
-    useEffect(() => {
-        if (user) {
-            fetchRecord();
-        }
-    }, [user,fetchRecord]);
-
-
-    const initializeEditForm =useCallback( () => {
-        if (!record) return;
-        setEditFormData({
-            restaurant_name: record.restaurant_name,
-            fullname: record.fullname,
-            email: record.email,
-            phone: record.phone,
-            restaurant_primary_contact: record.restaurant_primary_contact,
-            buildingno: record.buildingno,
-            floor: record.floor,
-            area: record.area,
-            city: record.city,
-            pincode: record.pincode,
-            landmark: record.landmark,
-            pan_number: record.pan_number,
-            fullnameaspan: record.fullnameaspan,
-            address: record.address,
-            gst: record.gst,
-            gst_number: record.gst_number || '',
-            fssai_number: record.fssai_number,
-            fssai_expiry: record.fssai_expiry,
-            bank_accno: record.bank_accno,
-            ifsc_code: record.ifsc_code,
-            account_type: record.account_type,
-            timings: record.timings || { hours: {} },
-            delivery_timings: record.delivery_timings || { hours: {} },
-            takeaway_timings: record.takeaway_timings || { hours: {} },
-            cuisines: record.cuisines ? JSON.parse(record.cuisines) : [],
-            services: record.services ? JSON.parse(record.services) : [],
-            logo_url: record.logo_url,
-            background_image_url: record.background_image_url,
-            pan_card: record.pan_card,
-            fssai_license: record.fssai_license,
-            gst_certificate: record.gst_certificate,
-        });
-        setFileUploads({});
-        setFilesToDelete(new Set());
-    },[record]);
-
-    useEffect(() => {
-        if (record) {
-            initializeEditForm();
-        }
-    }, [record,initializeEditForm]);
-
-    const checkAuth = () => {
-        const jwt = localStorage.getItem('jwt') || sessionStorage.getItem('jwt');
-        const userData = localStorage.getItem('user') || sessionStorage.getItem('user');
-        if (!jwt || !userData) {
-            window.location.href = '/login';
-            return;
-        }
-        try {
-            setUser(JSON.parse(userData));
-        } catch (e) {
-            console.error('Failed to parse user data:', e);
-            window.location.href = '/login';
-        }
-    };
-
-
-
-    const uploadFileAndGetId = async (file: File, jwt: string): Promise<number> => {
-        const formData = new FormData();
-        formData.append('files', file);
-        const response = await fetch(`${STRAPI_URL}/api/upload`, {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${jwt}` },
-            body: formData,
-        });
-        if (!response.ok) throw new Error(`Failed to upload file: ${response.statusText}`);
-        const uploadedFiles = await response.json();
-        if (uploadedFiles && uploadedFiles[0] && uploadedFiles[0].id) {
-            return uploadedFiles[0].id;
-        }
-        throw new Error('Upload response did not contain file ID.');
-    };
-
-    const handleSave = async () => {
-        if (!record) return;
-        try {
-            const jwt = localStorage.getItem('jwt') || sessionStorage.getItem('jwt');
-            if (!jwt) throw new Error('Authentication token missing.');
-            const payload: any = {
-                data: {
-                    restaurant_name: editFormData.restaurant_name,
-                    fullname: editFormData.fullname,
-                    phone: editFormData.phone,
-                    restaurant_primary_contact: editFormData.restaurant_primary_contact,
-                    buildingno: editFormData.buildingno,
-                    floor: editFormData.floor,
-                    area: editFormData.area,
-                    city: editFormData.city,
-                    pincode: editFormData.pincode,
-                    landmark: editFormData.landmark,
-                    pan_number: editFormData.pan_number,
-                    fullnameaspan: editFormData.fullnameaspan,
-                    address: editFormData.address,
-                    gst: editFormData.gst,
-                    gst_number: editFormData.gst_number || null,
-                    fssai_number: editFormData.fssai_number,
-                    fssai_expiry: editFormData.fssai_expiry,
-                    bank_accno: editFormData.bank_accno,
-                    ifsc_code: editFormData.ifsc_code,
-                    account_type: editFormData.account_type,
-                    timings: editFormData.timings,
-                    delivery_timings: editFormData.delivery_timings,
-                    takeaway_timings: editFormData.takeaway_timings,
-                    cuisines: JSON.stringify(editFormData.cuisines),
-                    services: JSON.stringify(editFormData.services),
-                }
-            };
-
-            const fileUploadPromises = Object.entries(fileUploads)
-                .filter(([_, file]) => file !== null)
-                .map(async ([fieldName, file]) => {
-                    if (file) {
-                        const fileId = await uploadFileAndGetId(file, jwt);
-                        payload.data[fieldName] = fileId;
-                    }
-                });
-
-            await Promise.all(fileUploadPromises);
-
-            filesToDelete.forEach((fieldName) => {
-                payload.data[fieldName] = null;
-            });
-
-            const response = await fetch(`${STRAPI_URL}/api/onboardapis/${record.documentId}`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${jwt}`,
-                },
-                body: JSON.stringify(payload),
-            });
-
-            if (!response.ok) throw new Error(`Failed to update record: ${response.statusText}`);
-
-            const fileDeletionPromises = Array.from(filesToDelete).map(async (fieldName) => {
-                const fileToDelete = record[fieldName as keyof OnboardingRecord] as MediaFile | null;
-                if (fileToDelete && fileToDelete.id) {
-                    try {
-                        await fetch(`${STRAPI_URL}/api/upload/files/${fileToDelete.id}`, {
-                            method: 'DELETE',
-                            headers: { Authorization: `Bearer ${jwt}` },
-                        });
-                    } catch (err) {
-                        console.error(`Failed to delete file ${fieldName}:`, err);
-                    }
-                }
-            });
-
-            await Promise.all(fileDeletionPromises);
-
-            showToast('Changes saved successfully!', 'success');
-            setIsEditing(false);
-            fetchRecord();
-        } catch (err) {
-            console.error('Error saving record:', err);
-            showToast('Failed to save changes', 'error');
-        }
-    };
-
-    const handleLogout = () => {
-        localStorage.removeItem('jwt');
-        localStorage.removeItem('user');
-        sessionStorage.removeItem('jwt');
-        sessionStorage.removeItem('user');
-        window.location.href = '/login';
-    };
-
-    const showToast = (message: string, type: 'success' | 'error') => {
-        setToast({ show: true, message, type });
-        setTimeout(() => setToast(null), 3000);
-    };
-
-    const getFileUrl = (file: MediaFile | null): string => {
-        if (!file || !file.url) return '';
-        return `${STRAPI_URL}${file.url}`;
-    };
-
-    const formatDate = (dateString: string): string => {
-        return new Date(dateString).toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        });
-    };
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-orange-50 to-red-50 px-4">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-16 w-16 border-4 border-orange-500 border-t-transparent mx-auto"></div>
-                    <p className="mt-4 text-gray-600 font-medium">Loading your application...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (!record) {
-        return (
-            <div className="min-h-screen bg-linear-to-br from-orange-50 to-red-50 px-4">
-                <div className="bg-orange-50 py-4">
-                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-                        <h1 className="text-xl sm:text-2xl font-bold text-gray-900">My Application</h1>
-                        <button onClick={handleLogout} className="px-3 py-1.5 sm:px-4 sm:py-2 bg-red-500 text-white text-sm sm:text-base rounded-lg hover:bg-red-600 transition">
-                            Logout
-                        </button>
-                    </div>
-                </div>
-                <div className="max-w-4xl mx-auto py-12">
-                    <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-12 text-center">
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-6">
-                            <svg className="w-8 h-8 sm:w-10 sm:h-10 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                        </div>
-                        <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2 sm:mb-3">No Application Found</h3>
-                        <p className="text-gray-600 mb-6 sm:mb-8 text-sm sm:text-base">You haven&apos;t submitted an onboarding application yet. Start your journey with us today!</p>
-                        <button
-                            onClick={() => window.location.href = '/onboarding'}
-                            className="px-6 py-2.5 sm:px-8 sm:py-3 bg-linear-to-r from-orange-500 to-red-500 text-white text-sm sm:text-base rounded-lg hover:from-orange-600 hover:to-red-600 transition font-semibold shadow-lg"
-                        >
-                            Start Application
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="min-h-screen bg-linear-to-br from-orange-50 to-red-50">
-            {/* Header */}
-            <div className="bg-white border-b border-gray-300 sticky top-0 z-40">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <div>
-                            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">My Application</h1>
-                            <p className="text-xs sm:text-sm text-gray-600">Manage your restaurant onboarding</p>
-                        </div>
-                        <button
-                            onClick={handleLogout}
-                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition font-medium"
-                        >
-                            Logout
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* Main Content */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-                {error && (
-                    <div className="mb-4 sm:mb-6 bg-red-50 border-l-4 border-red-500 p-3 sm:p-4 rounded-lg shadow-sm">
-                        <p className="text-xs sm:text-sm text-red-700 font-medium">{error}</p>
-                    </div>
-                )}
-
-                {/* Application Card */}
-                <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
-                    {/* Status Banner */}
-                    <div className={`px-4 sm:px-6 py-3 sm:py-4 ${record.application_status ? 'bg-green-100' : 'bg-blue-100'}`}>
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 rounded-full flex items-center justify-center backdrop-blur-sm">
-                                    {record.application_status ? (
-                                        <svg className="w-5 h-5 sm:w-6 sm:h-6 " fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                        </svg>
-                                    ) : (
-                                        <svg className="w-5 h-5 sm:w-6 sm:h-6 " fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                    )}
-                                </div>
-                                <div>
-                                    <p className=" font-bold text-base sm:text-lg">
-                                        {record.application_status ? 'Application Accepted' : 'Application Under Review'}
-                                    </p>
-                                    <p className=" text-xs sm:text-sm">
-                                        {record.application_status ? 'Your restaurant is now active!' : 'We\'ll notify you once reviewed'}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <p className=" text-xs font-medium">Submitted on</p>
-                                <p className=" font-bold text-sm">{formatDate(record.createdAt)}</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Restaurant Overview */}
-                    <div className="p-4 sm:p-6 border-b bg-linear-to-br from-gray-50 to-white">
-                        <div className="flex flex-col sm:flex-row items-start gap-4 sm:gap-6">
-                            <div className="shrink-0">
-                                {record.logo_url ? (
-                                    <Image
-                                        width={96} height={96}
-                                        src={getFileUrl(record.logo_url)}
-                                        alt={record.restaurant_name}
-                                        className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover shadow-lg ring-4 ring-white"
-                                    />
-                                ) : (
-                                    <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-linear-to-br from-orange-400 to-red-500 flex items-center justify-center shadow-lg ring-4 ring-white">
-                                        <span className="text-white font-bold text-2xl sm:text-3xl">{record.restaurant_name.charAt(0).toUpperCase()}</span>
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex-1 w-full">
-                                <h2 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2 truncate">{record.restaurant_name}</h2>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 text-xs sm:text-sm">
-                                    <div className="flex items-center gap-2 text-gray-600">
-                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                        </svg>
-                                        <span className="font-medium">{record.fullname}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-gray-600">
-                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                        </svg>
-                                        <span>{record.email}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-gray-600">
-                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                                        </svg>
-                                        <span>{record.phone}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-gray-600">
-                                        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                                        </svg>
-                                        <span>{record.city}, {record.pincode}</span>
-                                    </div>
-                                </div>
-                                <div className="mt-3 sm:mt-4 flex flex-wrap items-center gap-2">
-                                    <span className="px-3 py-1 sm:px-4 sm:py-1.5 bg-orange-100 text-orange-700 rounded-full text-xs sm:text-sm font-semibold uppercase tracking-wider">
-                                        {record.package} Plan
-                                    </span>
-                                    {JSON.parse(record.cuisines || '[]').slice(0, 2).map((cuisine: string, idx: number) => (
-                                        <span key={idx} className="px-2.5 py-1 sm:px-3 sm:py-1 bg-gray-100 text-gray-700 rounded-full text-xs sm:text-sm font-medium capitalize">
-                                            {cuisine}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="p-4 sm:p-6 bg-white flex flex-col sm:flex-row gap-3">
-                        <button
-                            onClick={() => setShowDetailModal(true)}
-                            className="flex-1 px-4 py-2.5 sm:px-6 sm:py-3 bg-blue-100 text-sm sm:text-base rounded-xl hover:cursor-pointer hover:border-2 border-blue-400 transition font-medium  flex items-center justify-center gap-2"
-                        >
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                            View Full Details
-                        </button>
-                        {!record.application_status && (
-                            <button
-                                onClick={() => setIsEditing(true)}
-                                className="flex-1 px-4 py-2.5 sm:px-6 sm:py-3 bg-orange-100  text-sm sm:text-base rounded-xl hover:cursor-pointer hover:border-2 border-orange-400 transition font-medium shadow-lg flex items-center justify-center gap-2"
-                            >
-                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                                Edit Application
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {!record.application_status && (
-                    <div className="mt-4 sm:mt-6 bg-blue-50 border-l-4 border-blue-500 p-3 sm:p-4 rounded-lg shadow-sm">
-                        <div className="flex items-start gap-2 sm:gap-3">
-                            <svg className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <div>
-                                <p className="text-xs sm:text-sm font-semibold text-blue-900 mb-1">Application Under Review</p>
-                                <p className="text-xs sm:text-sm text-blue-800">You can edit your application details until it is accepted. Once accepted, no changes can be made.</p>
-                            </div>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* Modals */}
-            {showDetailModal && record && (
-                <DetailModal record={record} onClose={() => setShowDetailModal(false)} getFileUrl={getFileUrl} />
-            )}
-            {isEditing && record && (
-                <EditModal
-                    formData={editFormData}
-                    fileUploads={fileUploads}
-                    onInputChange={(field, value) => setEditFormData(prev => ({ ...prev, [field]: value }))}
-                    onFileChange={(field, file) => setFileUploads(prev => ({ ...prev, [field]: file }))}
-                    onClose={() => setIsEditing(false)}
-                    onSave={handleSave}
-                    onCancel={() => {
-                        initializeEditForm();
-                        setIsEditing(false);
-                    }}
-                    getFileUrl={getFileUrl}
-                    onDeleteFile={(field) => {
-                        setFilesToDelete(prev => new Set(prev).add(field));
-                        setEditFormData(prev => ({ ...prev, [field]: null }));
-                        setFileUploads(prev => ({ ...prev, [field]: null }));
-                        showToast('File marked for deletion', 'success');
-                    }}
-                />
-            )}
-
-            {/* Toast */}
-            {toast?.show && (
-                <div className="fixed bottom-4 right-4 z-50 animate-slide-up">
-                    <div className={`px-4 py-2.5 sm:px-6 sm:py-3 rounded-lg shadow-lg flex items-center gap-2 sm:gap-3 ${toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'} text-white text-sm sm:text-base`}>
-                        {toast.type === 'success' ? (
-                            <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                            </svg>
-                        ) : (
-                            <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        )}
-                        <span>{toast.message}</span>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-}
-
-// Detail Modal Component
-function DetailModal({ record, onClose, getFileUrl }: { record: OnboardingRecord; onClose: () => void; getFileUrl: (file: MediaFile | null) => string }) {
-    const parseCuisines = (): string[] => {
-        try {
-            return JSON.parse(record.cuisines || '[]');
-        } catch {
-            return [];
-        }
-    };
-
-    const parseServices = (): string[] => {
-        try {
-            return JSON.parse(record.services || '[]');
-        } catch {
-            return [];
-        }
-    };
-
-    return (
-        <div className="fixed inset-0 bg-black/70 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-6 sm:top-10 mx-auto p-4 sm:p-6 w-full max-w-4xl sm:max-w-5xl shadow-2xl rounded-2xl bg-white mb-6 sm:mb-10">
-                <div className="flex justify-between items-start sm:items-center border-b pb-3 sm:pb-4 mb-4 sm:mb-6">
-                    <div>
-                        <h3 className="text-xl sm:text-2xl font-bold text-gray-900">{record.restaurant_name}</h3>
-                        <p className="text-xs sm:text-sm text-gray-500 mt-1">Complete Application Details</p>
-                    </div>
-                    <button
-                    aria-label='close'
-                        onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 transition p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg"
-                    >
-                        <svg className="h-5 w-5 sm:h-6 sm:w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-
-                <div className="max-h-[70vh] overflow-y-auto px-1 sm:px-2 space-y-4 sm:space-y-6">
-                    {/* Basic Info */}
-                    <div className="bg-linear-to-br from-orange-50 to-red-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Basic Information
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            <InfoItem label="Owner Name" value={record.fullname} />
-                            <InfoItem label="Email" value={record.email} />
-                            <InfoItem label="Phone" value={record.phone} />
-                            <InfoItem label="Restaurant Contact" value={record.restaurant_primary_contact} />
-                            <InfoItem label="Package" value={record.package} badge />
-                        </div>
-                    </div>
-
-                    {/* Address */}
-                    <div className="bg-linear-to-br from-blue-50 to-indigo-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                            </svg>
-                            Address Details
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            <InfoItem label="Building No" value={record.buildingno} />
-                            <InfoItem label="Floor" value={record.floor || 'N/A'} />
-                            <InfoItem label="Area" value={record.area} />
-                            <InfoItem label="City" value={record.city} />
-                            <InfoItem label="Pincode" value={record.pincode} />
-                            <InfoItem label="Landmark" value={record.landmark || 'N/A'} />
-                            <div className="sm:col-span-2">
-                                <InfoItem label="Full Address" value={record.address} />
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Business Details */}
-                    <div className="bg-linear-to-br from-green-50 to-emerald-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                            </svg>
-                            Business Information
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            <InfoItem label="PAN Number" value={record.pan_number} />
-                            <InfoItem label="PAN Name" value={record.fullnameaspan} />
-                            <InfoItem label="GST Registered" value={record.gst ? 'Yes' : 'No'} />
-                            {record.gst_number && <InfoItem label="GST Number" value={record.gst_number} />}
-                            <InfoItem label="FSSAI Number" value={record.fssai_number} />
-                            <InfoItem label="FSSAI Expiry" value={record.fssai_expiry} />
-                        </div>
-                    </div>
-
-                    {/* Bank Details */}
-                    <div className="bg-linear-to-br from-purple-50 to-pink-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                            </svg>
-                            Bank Details
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                            <InfoItem label="Account Number" value={record.bank_accno} />
-                            <InfoItem label="IFSC Code" value={record.ifsc_code} />
-                            <InfoItem label="Account Type" value={record.account_type} capitalize />
-                        </div>
-                    </div>
-
-                    {/* Cuisines & Services */}
-                    <div className="bg-linear-to-br from-yellow-50 to-orange-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                            </svg>
-                            Cuisines & Services
-                        </h4>
-                        <div className="space-y-3">
-                            <div>
-                                <p className="text-xs sm:text-sm font-semibold text-gray-700 mb-2">Cuisines</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                    {parseCuisines().map((cuisine, idx) => (
-                                        <span key={idx} className="px-2.5 py-1.5 sm:px-4 sm:py-2 bg-orange-100 text-orange-800 text-xs sm:text-sm rounded-lg font-medium capitalize">
-                                            {cuisine}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                            <div>
-                                <p className="text-xs sm:text-sm font-semibold text-gray-700 mb-2">Services</p>
-                                <div className="flex flex-wrap gap-1.5">
-                                    {parseServices().map((service, idx) => (
-                                        <span key={idx} className="px-2.5 py-1.5 sm:px-4 sm:py-2 bg-blue-100 text-blue-800 text-xs sm:text-sm rounded-lg font-medium capitalize">
-                                            {service.replace('_', ' ')}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Operating Hours */}
-                    <div className="bg-linear-to-br from-gray-50 to-slate-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            Operating Hours
-                        </h4>
-                        <div className="space-y-2 sm:space-y-3">
-                            {Object.entries(record.timings.hours).map(([day, slots]) => (
-                                <div key={day} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:p-3 bg-white rounded-lg border border-gray-200 gap-2">
-                                    <span className="font-semibold text-gray-800 text-sm sm:text-base">{day}</span>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {slots.map((slot: TimeSlot, idx: number) => (
-                                            <span key={idx} className="text-gray-600 text-xs sm:text-sm bg-gray-100 px-2.5 py-1 sm:px-3 sm:py-1 rounded-full">
-                                                {slot.open_time} - {slot.close_time}
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {(record.delivery_timings?.hours || record.takeaway_timings?.hours) && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-3 sm:mt-4">
-                                {record.delivery_timings?.hours && (
-                                    <div className="bg-blue-50 p-3 sm:p-4 rounded-lg">
-                                        <p className="text-xs sm:text-sm font-semibold text-blue-900 mb-1.5 sm:mb-2">Delivery Hours</p>
-                                        {Object.entries(record.delivery_timings.hours).map(([day, slots]) => (
-                                            <div key={day} className="flex justify-between text-xs sm:text-sm mb-0.5">
-                                                <span className="text-blue-700">{day}</span>
-                                                <span className="text-blue-600">{slots[0]?.open_time} - {slots[0]?.close_time}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                                {record.takeaway_timings?.hours && (
-                                    <div className="bg-green-50 p-3 sm:p-4 rounded-lg">
-                                        <p className="text-xs sm:text-sm font-semibold text-green-900 mb-1.5 sm:mb-2">Takeaway Hours</p>
-                                        {Object.entries(record.takeaway_timings.hours).map(([day, slots]) => (
-                                            <div key={day} className="flex justify-between text-xs sm:text-sm mb-0.5">
-                                                <span className="text-green-700">{day}</span>
-                                                <span className="text-green-600">{slots[0]?.open_time} - {slots[0]?.close_time}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Documents */}
-                    <div className="bg-linear-to-br from-indigo-50 to-purple-50 rounded-xl p-4 sm:p-6">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                            <svg className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                            </svg>
-                            Documents
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            {record.pan_card && <DocumentCard label="PAN Card" file={record.pan_card} getFileUrl={getFileUrl} />}
-                            {record.fssai_license && <DocumentCard label="FSSAI License" file={record.fssai_license} getFileUrl={getFileUrl} />}
-                            {record.gst_certificate && <DocumentCard label="GST Certificate" file={record.gst_certificate} getFileUrl={getFileUrl} />}
-                        </div>
-                    </div>
-
-                    {/* Images */}
-                    {(record.logo_url || record.background_image_url) && (
-                        <div className="bg-linear-to-br from-rose-50 to-pink-50 rounded-xl p-4 sm:p-6">
-                            <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-2">
-                                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                </svg>
-                                Restaurant Images
-                            </h4>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                                {record.logo_url && (
-                                    <div>
-                                        <p className="text-xs sm:text-sm font-semibold text-gray-700 mb-2">Logo</p>
-                                        <Image 
-                                            width={20} height={20}
-                                            src={getFileUrl(record.logo_url)}
-                                            alt="Restaurant Logo"
-                                            className="w-full  object-cover rounded-xl shadow-lg"
-                                        />
-                                    </div>
-                                )}
-                                {record.background_image_url && (
-                                    <div>
-                                        <p className="text-xs sm:text-sm font-semibold text-gray-700 mb-2">Background Image</p>
-                                        <Image width={96} height={96}
-                                            src={getFileUrl(record.background_image_url)}
-                                            alt="Background"
-                                            className="w-full h-32 sm:h-48 object-cover rounded-xl shadow-lg"
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                <div className="flex justify-end border-t pt-3 sm:pt-4 mt-4 sm:mt-6">
-                    <button
-                        onClick={onClose}
-                        className="px-4 py-2 sm:px-6 sm:py-2.5 bg-linear-to-r from-gray-600 to-gray-700 text-white text-xs sm:text-sm rounded-lg hover:from-gray-700 hover:to-gray-800 transition font-medium shadow-lg"
-                    >
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function InfoItem({ label, value, badge, capitalize }: { label: string; value: string; badge?: boolean; capitalize?: boolean }) {
-    return (
-        <div>
-            <p className="text-xs sm:text-sm font-semibold text-gray-600 mb-1">{label}</p>
-            {badge ? (
-                <span className="inline-block px-2.5 py-1 sm:px-3 sm:py-1 bg-orange-100 text-orange-700 rounded-full text-xs sm:text-sm font-semibold uppercase">
-                    {value}
-                </span>
-            ) : (
-                <p className={`text-sm sm:text-base text-gray-900 font-medium ${capitalize ? 'capitalize' : ''}`}>{value}</p>
-            )}
-        </div>
-    );
-}
-
-function DocumentCard({ label, file, getFileUrl }: { label: string; file: MediaFile; getFileUrl: (file: MediaFile | null) => string }) {
-    const isPDF = file.mime === 'application/pdf';
-    return (
-        <div className="border-2 border-gray-200 rounded-xl p-3 sm:p-4 hover:border-indigo-300 transition bg-white">
-            <p className="text-xs sm:text-sm font-semibold text-gray-700 mb-2">{label}</p>
-            {isPDF ? (
-                <a
-                    href={getFileUrl(file)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 sm:gap-3 text-indigo-600 hover:text-indigo-700 bg-indigo-50 p-2.5 sm:p-3 rounded-lg transition"
-                >
-                    <svg className="h-6 w-6 sm:h-8 sm:w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                    </svg>
-                    <div>
-                        <p className="font-medium text-xs sm:text-sm">{file.name}</p>
-                        <p className="text-xs text-gray-500">Click to view</p>
-                    </div>
-                </a>
-            ) : (
-                <Image
-                    width={96} height={96}
-                    src={getFileUrl(file)}
-                    alt={label}
-                    className="w-full h-28 sm:h-32 object-cover rounded-lg shadow-md"
-                />
-            )}
-        </div>
-    );
-}
-
-function EditModal({
-    formData,
-    fileUploads,
-    onInputChange,
-    onFileChange,
-    onClose,
-    onSave,
-    onCancel,
-    getFileUrl,
-    onDeleteFile,
+export default function CustomerDashboard({
+  accessToken,
+  profile,
+  onLogout,
+  initialUser,
 }: {
-    formData: EditFormData;
-    fileUploads: Record<string, File | null>;
-    onInputChange: (field: keyof EditFormData, value: any) => void;
-    onFileChange: (field: FileUploadField, file: File | null) => void;
-    onClose: () => void;
-    onSave: () => void;
-    onCancel: () => void;
-    getFileUrl: (file: MediaFile | null) => string;
-    onDeleteFile: (field: string) => void;
+  accessToken: string;
+  profile?: any;
+  onLogout?: () => Promise<void>;
+  initialUser?: { id: string; email?: string | null; role?: string };
 }) {
-    const renderFileInput = (label: string, field: FileUploadField, currentFile: MediaFile | null, acceptTypes: string) => {
-        const selectedFile = fileUploads[field];
-        const previewUrl = selectedFile ? URL.createObjectURL(selectedFile) : (currentFile ? getFileUrl(currentFile) : '');
-        const hasFile = selectedFile || currentFile;
-        return (
-            <div className="mb-3 sm:mb-4">
-                <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1.5 sm:mb-2">{label}</label>
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
-                    <input
-                        aria-label={label}
-                        type="file"
-                        accept={acceptTypes}
-                        onChange={(e) => onFileChange(field, e.target.files?.[0] || null)}
-                        className="w-full sm:flex-1 px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition"
-                    />
-                    {hasFile && (
-                        <button
-                            type="button"
-                            onClick={() => onDeleteFile(field)}
-                            className="w-full sm:w-auto px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm border-2 border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition font-medium"
-                        >
-                            Remove
-                        </button>
-                    )}
-                </div>
-                {previewUrl && (
-                    <div className="mt-2.5">
-                        {previewUrl.includes('.pdf') ? (
-                            <a
-                                href={previewUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:underline text-xs sm:text-sm flex items-center gap-1.5 sm:gap-2"
-                            >
-                                <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                </svg>
-                                View PDF
-                            </a>
-                        ) : (
-                            <Image
-                                width={96} height={96}
-                                src={previewUrl}
-                                alt={`${label} Preview`}
-                                className="h-24 sm:h-32 w-full object-contain border-2 border-gray-200 rounded-lg"
-                            />
-                        )}
-                    </div>
-                )}
-            </div>
-        );
-    };
+  const router = useRouter();
+  const [appTheme, setAppTheme] = useState<"light" | "dark">("light");
+  const [customerView, setCustomerView] = useState<"outlets" | "settings">("outlets");
+  const [currentProfile, setCurrentProfile] = useState<AppProfile>(profile);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [outletSearch, setOutletSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [applications, setApplications] = useState<OnboardingApplication[]>([]);
+  const [restaurants, setRestaurants] = useState<RestaurantRecord[]>([]);
+  const [selectedOutletId, setSelectedOutletId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"overview" | "operations" | "compliance" | "location">("overview");
+  const [showOutletSwitcher, setShowOutletSwitcher] = useState(false);
+  const [switcherSearch, setSwitcherSearch] = useState("");
+  const [showPackageModal, setShowPackageModal] = useState(false);
+  const [isEditingPending, setIsEditingPending] = useState(false);
+  const [isEditingLive, setIsEditingLive] = useState(false);
 
+  // Initialize theme from localStorage or system preference
+  useEffect(() => {
+    const saved = localStorage.getItem("marinate_portal_theme");
+    if (saved === "dark" || saved === "light") {
+      setAppTheme(saved);
+    }
+  }, []);
+
+  const toggleAppTheme = () => {
+    const next = appTheme === "light" ? "dark" : "light";
+    setAppTheme(next);
+    localStorage.setItem("marinate_portal_theme", next);
+  };
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [appRes, restRes] = await Promise.all([
+        getMyOnboardingApplications(accessToken),
+        getMyRestaurants(accessToken),
+      ]);
+
+      if (appRes.ok && appRes.data) {
+        setApplications(appRes.data);
+      }
+      if (restRes.ok && restRes.data) {
+        setRestaurants(restRes.data);
+      }
+    } catch (err) {
+      console.error("Failed to load customer outlets:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [accessToken]);
+
+  // Aggregate Unified Outlets
+  const outlets = useMemo<UnifiedOutlet[]>(() => {
+    const list: UnifiedOutlet[] = [];
+    const matchedAppIds = new Set<string>();
+
+    for (const r of restaurants) {
+      const matchingApp = applications.find(
+        (a) => a.restaurant_id === r.id || a.domain_name === r.domain_name
+      );
+      if (matchingApp) matchedAppIds.add(matchingApp.id);
+
+      let rAddress: any = {};
+      if (typeof r.address === "object" && r.address !== null) {
+        rAddress = r.address;
+      } else if (typeof r.address === "string") {
+        try {
+          rAddress = JSON.parse(r.address);
+        } catch {
+          rAddress = {};
+        }
+      }
+      const addrObj = rAddress as Record<string, string>;
+
+      const buildingno = addrObj.address_line_1 || addrObj.buildingno || (typeof r.address === "string" && !r.address.startsWith("{") ? r.address : "");
+      const floor = addrObj.address_line_2 || addrObj.floor || "";
+      const area = addrObj.area || (addrObj.address_line_2 ? addrObj.address_line_2 : "") || buildingno;
+      const city = addrObj.city || (matchingApp?.address as any)?.city || "";
+      const pincode = addrObj.pincode || (matchingApp?.address as any)?.pincode || "";
+      const landmark = addrObj.landmark || (matchingApp?.address as any)?.landmark || "";
+
+      list.push({
+        id: r.id,
+        name: r.restaurant_name,
+        domainName: r.domain_name,
+        domainUrl: r.domain_url || `${r.domain_name}.marinate360.com`,
+        posDomain: r.pos_domain || "pos.marinate360.com",
+        isLive: true,
+        status: r.is_active ? "active" : "rejected",
+        statusLabel: r.is_active ? "Active Outlet" : "Deactivated",
+        restaurantId: r.id,
+        applicationId: matchingApp?.id,
+        package: r.package || matchingApp?.package || "marinate-menu",
+        services: Array.isArray(r.services) ? r.services : matchingApp?.services || [],
+        cuisines: Array.isArray(r.cuisines) ? r.cuisines : matchingApp?.cuisines || [],
+        phone: String(r.contact || matchingApp?.phone || ""),
+        email: r.email || matchingApp?.email || "",
+        address: {
+          buildingno,
+          floor,
+          area,
+          city,
+          pincode,
+          landmark,
+          registered_business_address:
+            addrObj.address_line_1 || addrObj.registered_business_address || (typeof r.address === "string" ? r.address : ""),
+        },
+        legal: {
+          pan_number: (matchingApp?.legal?.pan_number as string) || "",
+          fullnameaspan: (matchingApp?.legal?.fullnameaspan as string) || "",
+          gst: Boolean(r.gst_number || matchingApp?.legal?.gst),
+          gst_number: r.gst_number || (matchingApp?.legal?.gst_number as string) || "",
+          fssai_number: r.fssai_number || (matchingApp?.legal?.fssai_number as string) || "",
+          fssai_expiry: (matchingApp?.legal?.fssai_expiry as string) || "",
+        },
+        bank: {
+          bank_accno: (matchingApp?.bank?.bank_accno as string) || "",
+          ifsc_code: (matchingApp?.bank?.ifsc_code as string) || "",
+          account_type: (matchingApp?.bank?.account_type as string) || "Current",
+        },
+        timings: (r.timings as UnifiedOutlet["timings"]) || matchingApp?.timings,
+        images: (matchingApp?.images as UnifiedOutlet["images"]) || {
+          logo_url: { public_url: r.logo_url ?? undefined },
+          background_image_url: { public_url: r.background_image_url ?? undefined },
+        },
+        documents: (matchingApp?.documents as UnifiedOutlet["documents"]) || {},
+        rawApplication: matchingApp,
+        rawRestaurant: r,
+      });
+    }
+
+    // Add pending or unlinked applications
+    for (const a of applications) {
+      if (matchedAppIds.has(a.id)) continue;
+      const addr = (a.address || {}) as Record<string, string>;
+      const leg = (a.legal || {}) as Record<string, string>;
+      const bnk = (a.bank || {}) as Record<string, string>;
+
+      list.push({
+        id: a.id,
+        name: a.restaurant_name,
+        domainName: a.domain_name,
+        domainUrl: `${a.domain_name}.marinate360.com`,
+        posDomain: "pos.marinate360.com",
+        isLive: false,
+        status: a.status === "accepted" ? "active" : a.status === "rejected" ? "rejected" : "pending",
+        statusLabel:
+          a.status === "accepted"
+            ? "Approved"
+            : a.status === "rejected"
+            ? "Action Required"
+            : "Under Review",
+        applicationId: a.id,
+        package: a.package || "marinate-menu",
+        services: Array.isArray(a.services) ? a.services : [],
+        cuisines: Array.isArray(a.cuisines) ? a.cuisines : [],
+        phone: String(a.phone || a.restaurant_primary_contact || ""),
+        email: a.email || "",
+        address: {
+          buildingno: addr.buildingno || "",
+          floor: addr.floor || "",
+          area: addr.area || "",
+          city: addr.city || "",
+          pincode: addr.pincode || "",
+          landmark: addr.landmark || "",
+          registered_business_address: addr.registered_business_address || "",
+        },
+        legal: {
+          pan_number: leg.pan_number || "",
+          fullnameaspan: leg.fullnameaspan || "",
+          gst: Boolean(leg.gst),
+          gst_number: leg.gst_number || "",
+          fssai_number: leg.fssai_number || "",
+          fssai_expiry: leg.fssai_expiry || "",
+        },
+        bank: {
+          bank_accno: bnk.bank_accno || "",
+          ifsc_code: bnk.ifsc_code || "",
+          account_type: bnk.account_type || "Current",
+        },
+        timings: a.timings,
+        images: (a.images as UnifiedOutlet["images"]) || {},
+        documents: (a.documents as UnifiedOutlet["documents"]) || {},
+        rawApplication: a,
+      });
+    }
+
+    return list;
+  }, [applications, restaurants]);
+
+  const currentOutlet = useMemo(() => {
+    if (!selectedOutletId) return null;
+    return outlets.find((o) => o.id === selectedOutletId) || null;
+  }, [outlets, selectedOutletId]);
+
+  const handleSignOut = async () => {
+    if (onLogout) {
+      await onLogout();
+    } else {
+      clearAuthSession();
+      router.push("/login");
+    }
+  };
+
+  const filteredSwitcherOutlets = useMemo(() => {
+    if (!switcherSearch.trim()) return outlets;
+    const q = switcherSearch.toLowerCase();
+    return outlets.filter((o) => o.name.toLowerCase().includes(q) || o.domainName.toLowerCase().includes(q));
+  }, [outlets, switcherSearch]);
+
+  const isDark = appTheme === "dark";
+
+  if (loading) {
     return (
-        <div className="fixed inset-0 bg-black/70 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-6 sm:top-10 mx-auto p-4 sm:p-6 w-full max-w-4xl sm:max-w-5xl shadow-2xl rounded-2xl bg-white mb-6 sm:mb-10">
-                <div className="flex justify-between items-start sm:items-center border-b pb-3 sm:pb-4 mb-4 sm:mb-6">
-                    <div>
-                        <h3 className="text-xl sm:text-2xl font-bold text-gray-900">Edit Application</h3>
-                        <p className="text-xs sm:text-sm text-gray-500 mt-1">Update your restaurant information</p>
-                    </div>
-                    <button
-                        aria-label='close'
-                        onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 transition p-1.5 sm:p-2 hover:bg-gray-100 rounded-lg"
-                    >
-                        <svg className="h-5 w-5 sm:h-6 sm:w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-
-                <div className="max-h-[70vh] overflow-y-auto px-1 sm:px-2 space-y-4 sm:space-y-6">
-                    {/* Basic Info */}
-                    <Section title="Basic Information" icon="info">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            <InputField
-                                label="Restaurant Name *"
-                                value={formData.restaurant_name}
-                                onChange={(e) => onInputChange('restaurant_name', e.target.value)}
-                                placeholder="Enter restaurant name"
-                            />
-                            <InputField
-                                label="Owner Name *"
-                                value={formData.fullname}
-                                onChange={(e) => onInputChange('fullname', e.target.value)}
-                                placeholder="Owner's full name"
-                            />
-                            <InputField
-                                label="Email *"
-                                type="email"
-                                value={formData.email}
-                                onChange={(e) => onInputChange('email', e.target.value)}
-                                placeholder="your@email.com"
-                                disabled
-                            />
-                            <InputField
-                                label="Phone *"
-                                value={formData.phone}
-                                onChange={(e) => onInputChange('phone', e.target.value)}
-                                placeholder="+91 XXXXX XXXXX"
-                            />
-                            <InputField
-                                label="Restaurant Contact *"
-                                value={formData.restaurant_primary_contact}
-                                onChange={(e) => onInputChange('restaurant_primary_contact', e.target.value)}
-                                placeholder="Restaurant phone"
-                                className="sm:col-span-2"
-                            />
-                        </div>
-                    </Section>
-
-                    {/* Address */}
-                    <Section title="Address Information" icon="location">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            <InputField label="Building No *" value={formData.buildingno} onChange={(e) => onInputChange('buildingno', e.target.value)} />
-                            <InputField label="Floor" value={formData.floor} onChange={(e) => onInputChange('floor', e.target.value)} />
-                            <InputField label="Area *" value={formData.area} onChange={(e) => onInputChange('area', e.target.value)} />
-                            <InputField label="City *" value={formData.city} onChange={(e) => onInputChange('city', e.target.value)} />
-                            <InputField label="Pincode *" value={formData.pincode} onChange={(e) => onInputChange('pincode', e.target.value)} maxLength={6} />
-                            <div className="sm:col-span-2">
-                                <InputField label="Landmark" value={formData.landmark} onChange={(e) => onInputChange('landmark', e.target.value)} />
-                            </div>
-                            <div className="sm:col-span-2">
-                                <InputField label="Complete Address *" value={formData.address} onChange={(e) => onInputChange('address', e.target.value)} />
-                            </div>
-                        </div>
-                    </Section>
-
-                    {/* Business Info */}
-                    <Section title="Business Information" icon="document">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                            <InputField
-                                label="PAN Number *"
-                                value={formData.pan_number}
-                                onChange={(e) => onInputChange('pan_number', e.target.value.toUpperCase())}
-                                maxLength={10}
-                            />
-                            <InputField
-                                label="Name as per PAN *"
-                                value={formData.fullnameaspan}
-                                onChange={(e) => onInputChange('fullnameaspan', e.target.value)}
-                            />
-                            <InputField
-                                label="FSSAI Number *"
-                                value={formData.fssai_number}
-                                onChange={(e) => onInputChange('fssai_number', e.target.value)}
-                            />
-                            <InputField
-                                label="FSSAI Expiry *"
-                                type="date"
-                                value={formData.fssai_expiry}
-                                onChange={(e) => onInputChange('fssai_expiry', e.target.value)}
-                            />
-                            <div className="sm:col-span-2">
-                                <label className="flex items-center cursor-pointer bg-gray-50 px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg border-2 border-gray-200 hover:border-orange-300 transition">
-                                    <input
-                                        type="checkbox"
-                                        checked={formData.gst}
-                                        onChange={(e) => onInputChange('gst', e.target.checked)}
-                                        className="h-4 w-4 sm:h-5 sm:w-5 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
-                                    />
-                                    <span className="ml-2.5 sm:ml-3 text-xs sm:text-sm font-semibold text-gray-700">GST Registered</span>
-                                </label>
-                            </div>
-                            {formData.gst && (
-                                <div className="sm:col-span-2">
-                                    <InputField
-                                        label="GST Number"
-                                        value={formData.gst_number}
-                                        onChange={(e) => onInputChange('gst_number', e.target.value.toUpperCase())}
-                                        maxLength={15}
-                                    />
-                                </div>
-                            )}
-                        </div>
-                    </Section>
-
-                    {/* Bank Details */}
-                    <Section title="Bank Details" icon="card">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                            <InputField label="Account Number *" value={formData.bank_accno} onChange={(e) => onInputChange('bank_accno', e.target.value)} />
-                            <InputField label="IFSC Code *" value={formData.ifsc_code} onChange={(e) => onInputChange('ifsc_code', e.target.value.toUpperCase())} maxLength={11} />
-                            <div>
-                                <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1.5 sm:mb-2">Account Type *</label>
-                                <select
-                                     aria-label="account"
-                                    value={formData.account_type}
-                                    onChange={(e) => onInputChange('account_type', e.target.value)}
-                                    className="w-full px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-                                >
-                                    <option value="savings">Savings</option>
-                                    <option value="current">Current</option>
-                                </select>
-                            </div>
-                        </div>
-                    </Section>
-
-                    {/* Cuisines */}
-                    <Section title="Cuisines" icon="food">
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 sm:gap-3">
-                            {CUISINES.map((cuisine) => (
-                                <label key={cuisine} className="flex items-center cursor-pointer bg-gray-50 px-2.5 py-2 sm:px-3 sm:py-2.5 rounded-lg border border-gray-200 hover:border-orange-300 transition">
-                                    <input
-                                        type="checkbox"
-                                        checked={formData.cuisines.includes(cuisine.toLowerCase())}
-                                        onChange={() => {
-                                            const cuisineLower = cuisine.toLowerCase();
-                                            if (formData.cuisines.includes(cuisineLower)) {
-                                                onInputChange('cuisines', formData.cuisines.filter(c => c !== cuisineLower));
-                                            } else {
-                                                if (formData.cuisines.length < 3) {
-                                                    onInputChange('cuisines', [...formData.cuisines, cuisineLower]);
-                                                }
-                                            }
-                                        }}
-                                        className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-orange-600 rounded border-gray-300 focus:ring-orange-500"
-                                    />
-                                    <span className="ml-2 sm:ml-2.5 text-xs sm:text-sm font-medium text-gray-700">{cuisine}</span>
-                                </label>
-                            ))}
-                        </div>
-                        <p className="text-xs sm:text-sm text-gray-500 mt-1.5 sm:mt-2">Selected: {formData.cuisines.length}/3 (Maximum 3 cuisines)</p>
-                    </Section>
-
-                    {/* Operating Hours */}
-                    <Section title="Restaurant Operating Hours" icon="clock">
-                        <div className="space-y-2.5 sm:space-y-3">
-                            {DAYS.map((day) => {
-                                const daySlots = formData.timings.hours[day] || [];
-                                return (
-                                    <div key={day} className="bg-gray-50 p-3 sm:p-4 rounded-lg border border-gray-200">
-                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2.5 sm:mb-3 gap-2">
-                                            <h5 className="font-semibold text-gray-900 text-sm sm:text-base">{day}</h5>
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    const newSlots = [...daySlots, { open_time: '9:00', close_time: '23:00' }];
-                                                    onInputChange('timings', {
-                                                        ...formData.timings,
-                                                        hours: { ...formData.timings.hours, [day]: newSlots }
-                                                    });
-                                                }}
-                                                className="text-xs sm:text-sm text-orange-600 hover:text-orange-700 font-medium"
-                                            >
-                                                + Add Slot
-                                            </button>
-                                        </div>
-                                        {daySlots.map((slot: TimeSlot, idx: number) => (
-                                            <div key={idx} className="flex flex-col sm:flex-row items-center gap-2 mb-2">
-                                                <input
-                                                    aria-label='time'
-                                                    type="time"
-                                                    value={slot.open_time}
-                                                    onChange={(e) => {
-                                                        const newSlots = [...daySlots];
-                                                        newSlots[idx] = { ...newSlots[idx], open_time: e.target.value };
-                                                        onInputChange('timings', {
-                                                            ...formData.timings,
-                                                            hours: { ...formData.timings.hours, [day]: newSlots }
-                                                        });
-                                                    }}
-                                                    className="w-full sm:flex-1 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border-2 border-gray-300 rounded-lg"
-                                                />
-                                                <span className="text-gray-500 text-xs sm:text-sm">to</span>
-                                                <input
-                                                    aria-label='time'
-                                                    type="time"
-                                                    value={slot.close_time}
-                                                    onChange={(e) => {
-                                                        const newSlots = [...daySlots];
-                                                        newSlots[idx] = { ...newSlots[idx], close_time: e.target.value };
-                                                        onInputChange('timings', {
-                                                            ...formData.timings,
-                                                            hours: { ...formData.timings.hours, [day]: newSlots }
-                                                        });
-                                                    }}
-                                                    className="w-full sm:flex-1 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border-2 border-gray-300 rounded-lg"
-                                                />
-                                                {daySlots.length > 1 && (
-                                                    <button
-                                                        aria-label='button'
-                                                        type="button"
-                                                        onClick={() => {
-                                                            const newSlots = daySlots.filter((_: any, i: number) => i !== idx);
-                                                            onInputChange('timings', {
-                                                                ...formData.timings,
-                                                                hours: { ...formData.timings.hours, [day]: newSlots }
-                                                            });
-                                                        }}
-                                                        className="p-1.5 sm:p-2 text-red-500 hover:bg-red-50 rounded-lg"
-                                                    >
-                                                        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                        </svg>
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </Section>
-
-                    {/* Delivery & Takeaway Timings */}
-                    <Section title="Delivery & Takeaway Hours" icon="delivery">
-                        <div className="grid grid-cols-1 gap-4 sm:gap-6">
-                            {formData.delivery_timings?.hours && (
-                                <div className="bg-blue-50 p-4 sm:p-5 rounded-xl border-2 border-blue-200">
-                                    <h5 className="font-semibold text-blue-900 mb-2.5 sm:mb-3 text-sm sm:text-lg">Delivery Timings</h5>
-                                    {DAYS.map((day) => {
-                                        const daySlots = formData.delivery_timings?.hours?.[day] || [];
-                                        if (daySlots.length === 0) return null;
-                                        return (
-                                            <div key={day} className="mb-2.5 sm:mb-3">
-                                                <p className="text-xs sm:text-sm font-medium text-blue-700 mb-1">{day}</p>
-                                                {daySlots.map((slot: TimeSlot, idx: number) => (
-                                                    <div key={idx} className="flex flex-col sm:flex-row items-center gap-2 mb-1.5">
-                                                        <input
-                                                        aria-label="input"
-                                                            type="time"
-                                                            value={slot.open_time}
-                                                            onChange={(e) => {
-                                                                const newSlots = [...daySlots];
-                                                                newSlots[idx] = { ...newSlots[idx], open_time: e.target.value };
-                                                                onInputChange('delivery_timings', {
-                                                                    ...formData.delivery_timings,
-                                                                    hours: { ...formData.delivery_timings.hours, [day]: newSlots }
-                                                                });
-                                                            }}
-                                                            className="w-full sm:flex-1 px-2 py-1.5 sm:px-2.5 sm:py-2 text-xs sm:text-sm border border-blue-300 rounded-lg bg-white"
-                                                        />
-                                                        <span className="text-blue-600 text-xs sm:text-sm">to</span>
-                                                        <input
-                                                         aria-label='time'
-                                                            type="time"
-                                                            value={slot.close_time}
-                                                            onChange={(e) => {
-                                                                const newSlots = [...daySlots];
-                                                                newSlots[idx] = { ...newSlots[idx], close_time: e.target.value };
-                                                                onInputChange('delivery_timings', {
-                                                                    ...formData.delivery_timings,
-                                                                    hours: { ...formData.delivery_timings.hours, [day]: newSlots }
-                                                                });
-                                                            }}
-                                                            className="w-full sm:flex-1 px-2 py-1.5 sm:px-2.5 sm:py-2 text-xs sm:text-sm border border-blue-300 rounded-lg bg-white"
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                            {formData.takeaway_timings?.hours && (
-                                <div className="bg-green-50 p-4 sm:p-5 rounded-xl border-2 border-green-200">
-                                    <h5 className="font-semibold text-green-900 mb-2.5 sm:mb-3 text-sm sm:text-lg">Takeaway Timings</h5>
-                                    {DAYS.map((day) => {
-                                        const daySlots = formData.takeaway_timings?.hours?.[day] || [];
-                                        if (daySlots.length === 0) return null;
-                                        return (
-                                            <div key={day} className="mb-2.5 sm:mb-3">
-                                                <p className="text-xs sm:text-sm font-medium text-green-700 mb-1">{day}</p>
-                                                {daySlots.map((slot: TimeSlot, idx: number) => (
-                                                    <div key={idx} className="flex flex-col sm:flex-row items-center gap-2 mb-1.5">
-                                                        <input
-                                                            aria-label="input"
-                                                            type="time"
-                                                            value={slot.open_time}
-                                                            onChange={(e) => {
-                                                                const newSlots = [...daySlots];
-                                                                newSlots[idx] = { ...newSlots[idx], open_time: e.target.value };
-                                                                onInputChange('takeaway_timings', {
-                                                                    ...formData.takeaway_timings,
-                                                                    hours: { ...formData.takeaway_timings.hours, [day]: newSlots }
-                                                                });
-                                                            }}
-                                                            className="w-full sm:flex-1 px-2 py-1.5 sm:px-2.5 sm:py-2 text-xs sm:text-sm border border-green-300 rounded-lg bg-white"
-                                                        />
-                                                        <span className="text-green-600 text-xs sm:text-sm">to</span>
-                                                        <input
-                                                          aria-label='time'
-                                                            type="time"
-                                                            value={slot.close_time}
-                                                            onChange={(e) => {
-                                                                const newSlots = [...daySlots];
-                                                                newSlots[idx] = { ...newSlots[idx], close_time: e.target.value };
-                                                                onInputChange('takeaway_timings', {
-                                                                    ...formData.takeaway_timings,
-                                                                    hours: { ...formData.takeaway_timings.hours, [day]: newSlots }
-                                                                });
-                                                            }}
-                                                            className="w-full sm:flex-1 px-2 py-1.5 sm:px-2.5 sm:py-2 text-xs sm:text-sm border border-green-300 rounded-lg bg-white"
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                        {(!formData.delivery_timings?.hours && !formData.takeaway_timings?.hours) && (
-                            <p className="text-xs sm:text-sm text-gray-500 text-center py-3 sm:py-4">No delivery or takeaway timings configured</p>
-                        )}
-                    </Section>
-
-                    {/* Documents & Images */}
-                    <Section title="Documents & Images" icon="upload">
-                        <div className="grid grid-cols-1 gap-4 sm:gap-5">
-                            {renderFileInput("Restaurant Logo", "logo_url", formData.logo_url, "image/*")}
-                            {renderFileInput("Background Image", "background_image_url", formData.background_image_url, "image/*")}
-                            {renderFileInput("PAN Card", "pan_card", formData.pan_card, ".pdf,image/*")}
-                            {renderFileInput("FSSAI License", "fssai_license", formData.fssai_license, ".pdf,image/*")}
-                            {renderFileInput("GST Certificate", "gst_certificate", formData.gst_certificate, ".pdf,image/*")}
-                        </div>
-                    </Section>
-                </div>
-
-                <div className="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 border-t pt-3 sm:pt-5 mt-4 sm:mt-6">
-                    <button
-                        onClick={onCancel}
-                        className="px-4 py-2 sm:px-6 sm:py-2.5 border-2 border-gray-300 rounded-lg text-gray-700 text-xs sm:text-sm hover:bg-gray-50 transition font-medium"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={onSave}
-                        className="px-4 py-2 sm:px-6 sm:py-2.5 bg-linear-to-r from-orange-500 to-red-500 text-white text-xs sm:text-sm rounded-lg hover:from-orange-600 hover:to-red-600 transition font-medium shadow-lg"
-                    >
-                        Save Changes
-                    </button>
-                </div>
-            </div>
+      <div className={`flex min-h-screen items-center justify-center ${isDark ? "bg-zinc-950 text-zinc-100" : "bg-zinc-50 text-zinc-900"}`}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-7 w-7 animate-spin rounded-full border-2 border-orange-600 border-t-transparent" />
+          <p className="text-xs font-medium text-zinc-500">Loading your workspace...</p>
         </div>
+      </div>
     );
-}
+  }
 
-function Section({ title, icon, children }: { title: string; icon: string; children: React.ReactNode }) {
-    const icons: Record<string, JSX.Element> = {
-        info: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-        location: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /></svg>,
-        document: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
-        card: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>,
-        food: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>,
-        clock: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
-        delivery: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" /></svg>,
-        upload: <svg className="w-4 h-4 sm:w-5 sm:h-5 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>,
-    };
-    return (
-        <div className="bg-linear-to-br from-gray-50 to-white rounded-xl p-4 sm:p-6 border border-gray-200">
-            <h4 className="text-base sm:text-lg font-bold text-gray-900 mb-3 sm:mb-4 flex items-center gap-1.5 sm:gap-2">
-                {icons[icon]}
-                {title}
-            </h4>
-            {children}
-        </div>
-    );
-}
-
-function InputField({ label, type = 'text', value, onChange, placeholder, disabled, maxLength, className = '' }: { label: string; type?: string; value: string; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void; placeholder?: string; disabled?: boolean; maxLength?: number; className?: string }) {
-    return (
-        <div className={className}>
-            <label className="block text-xs sm:text-sm font-semibold text-gray-700 mb-1.5 sm:mb-2">{label}</label>
-            <input
-                type={type}
-                value={value}
-                onChange={onChange}
-                placeholder={placeholder}
-                disabled={disabled}
-                maxLength={maxLength}
-                className={`w-full px-3 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition ${disabled ? 'bg-gray-100 cursor-not-allowed' : ''}`}
+  return (
+    <div className={`min-h-screen antialiased font-sans flex flex-col transition-colors duration-150 ${isDark ? "bg-zinc-950 text-zinc-100 dark" : "bg-[#fafafa] text-zinc-900"}`}>
+      {/* Top Supabase-Style Navigation Bar */}
+      <header className={`sticky top-0 z-40 w-full border-b px-4 sm:px-6 h-14 flex items-center justify-between backdrop-blur ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white/95 border-zinc-200/80"}`}>
+        <div className="flex items-center gap-3">
+          {/* Brand Logo */}
+          <div className="flex items-center gap-2">
+            <Image
+              src="/logo/m360logo.png"
+              alt="Marinate360"
+              width={28}
+              height={28}
+              className="h-7 w-auto object-contain"
             />
+            <span className={`font-semibold text-sm tracking-tight hidden sm:inline-block ${isDark ? "text-white" : "text-zinc-900"}`}>
+              Marinate360
+            </span>
+          </div>
+
+          <span className={isDark ? "text-zinc-700" : "text-zinc-300"}>/</span>
+
+          {/* Outlet Switcher Popover */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowOutletSwitcher(!showOutletSwitcher)}
+              className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                isDark
+                  ? "border-zinc-800 hover:border-zinc-700 bg-zinc-800/60 text-zinc-200"
+                  : "border-zinc-200 hover:border-zinc-300 bg-zinc-50/50 text-zinc-800"
+              }`}
+            >
+              <Store className="w-3.5 h-3.5 text-zinc-400" />
+              <span className="max-w-[140px] truncate">
+                {currentOutlet ? currentOutlet.name : "All Outlets Hub"}
+              </span>
+              {currentOutlet && (
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    currentOutlet.status === "active"
+                      ? "bg-emerald-500"
+                      : currentOutlet.status === "pending"
+                      ? "bg-amber-500"
+                      : "bg-rose-500"
+                  }`}
+                />
+              )}
+              <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+            </button>
+
+            {showOutletSwitcher && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowOutletSwitcher(false)}
+                />
+                <div className={`absolute left-0 mt-1.5 w-72 rounded-xl border shadow-xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-100 ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}>
+                  <div className="px-2 pt-1 pb-2">
+                    <div className={`flex items-center gap-2 px-2 py-1.5 rounded-md border text-xs ${isDark ? "bg-zinc-800/80 border-zinc-700 text-zinc-400" : "bg-zinc-50 border-zinc-200 text-zinc-500"}`}>
+                      <Search className="w-3.5 h-3.5" />
+                      <input
+                        type="text"
+                        placeholder="Search branches..."
+                        value={switcherSearch}
+                        onChange={(e) => setSwitcherSearch(e.target.value)}
+                        className="bg-transparent outline-none w-full placeholder:text-zinc-400 text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400 px-2 pt-1">
+                    Your Outlets
+                  </div>
+
+                  <div className="max-h-52 overflow-y-auto space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedOutletId(null);
+                        setShowOutletSwitcher(false);
+                      }}
+                      className={`w-full text-left flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition ${
+                        selectedOutletId === null
+                          ? "bg-orange-500/10 text-orange-600"
+                          : isDark
+                          ? "text-zinc-300 hover:bg-zinc-800"
+                          : "text-zinc-700 hover:bg-zinc-50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Layers className="w-3.5 h-3.5 text-zinc-400" />
+                        <span>All Outlets Overview</span>
+                      </div>
+                      {selectedOutletId === null && <Check className="w-3.5 h-3.5 text-orange-600" />}
+                    </button>
+
+                    {filteredSwitcherOutlets.map((outlet) => (
+                      <button
+                        key={outlet.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedOutletId(outlet.id);
+                          setShowOutletSwitcher(false);
+                        }}
+                        className={`w-full text-left flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition ${
+                          selectedOutletId === outlet.id
+                            ? "bg-orange-500/10 text-orange-600"
+                            : isDark
+                            ? "text-zinc-300 hover:bg-zinc-800"
+                            : "text-zinc-700 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <Store className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                          <span className="truncate">{outlet.name}</span>
+                        </div>
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                            outlet.status === "active"
+                              ? "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20"
+                              : outlet.status === "pending"
+                              ? "bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                              : "bg-rose-500/10 text-rose-600 border border-rose-500/20"
+                          }`}
+                        >
+                          {outlet.statusLabel}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className={`border-t pt-1 ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowOutletSwitcher(false);
+                        setShowPackageModal(true);
+                      }}
+                      className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium text-orange-600 hover:bg-orange-500/10 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Register New Outlet</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Right Header Actions */}
+        <div className="flex items-center gap-3">
+          {currentOutlet && currentOutlet.isLive && (
+            <a
+              href={`https://${currentOutlet.posDomain}`}
+              target="_blank"
+              rel="noreferrer"
+              className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition shadow-xs ${
+                isDark
+                  ? "border-zinc-800 bg-zinc-800/80 hover:bg-zinc-800 text-zinc-200"
+                  : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-800"
+              }`}
+            >
+              <Terminal className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Launch POS</span>
+              <ExternalLink className="w-3 h-3 text-zinc-400" />
+            </a>
+          )}
+
+          {/* Theme Toggle (Light / Dark for Onboarding App) */}
+          <button
+            type="button"
+            onClick={toggleAppTheme}
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            className={`p-1.5 rounded-lg border transition ${
+              isDark
+                ? "border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-amber-400"
+                : "border-zinc-200 hover:bg-zinc-100 text-zinc-600"
+            }`}
+          >
+            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+
+          {/* Top-Right Account Menu */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setProfileDropdownOpen((prev) => !prev)}
+              className={`inline-flex items-center gap-2 rounded-full border py-1 pl-1.5 pr-2.5 text-xs font-semibold shadow-2xs transition ${
+                isDark
+                  ? "border-zinc-800 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                  : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-800"
+              }`}
+            >
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-100 text-orange-700 text-xs font-bold">
+                {(currentProfile.first_name?.[0] || currentProfile.username?.[0] || currentProfile.email?.[0] || "C").toUpperCase()}
+              </div>
+              <div className="hidden sm:flex flex-col text-left">
+                <span className={`text-xs font-bold leading-tight ${isDark ? "text-zinc-100" : "text-zinc-900"}`}>
+                  {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || currentProfile.email?.split("@")[0] || "Account"}
+                </span>
+                <span className="text-[10px] text-zinc-400 capitalize">{currentProfile.role?.replace("_", " ") || "Owner"}</span>
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${profileDropdownOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {profileDropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setProfileDropdownOpen(false)} />
+                <div className={`absolute right-0 top-full mt-2 z-50 w-64 rounded-xl border p-2 shadow-xl animate-in fade-in zoom-in-95 duration-100 ${
+                  isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
+                }`}>
+                  <div className={`px-3 py-2 border-b ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                    <p className="text-xs font-bold">
+                      {currentProfile.first_name ? `${currentProfile.first_name} ${currentProfile.last_name || ""}`.trim() : currentProfile.username || "Account"}
+                    </p>
+                    <p className="text-xs text-zinc-400 truncate mt-0.5">{currentProfile.email}</p>
+                    <span className="mt-1.5 inline-block rounded-full bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 text-[10px] font-semibold text-orange-600 capitalize">
+                      {currentProfile.role?.replace("_", " ") || "Restaurant Owner"}
+                    </span>
+                  </div>
+
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setSelectedOutletId(null);
+                        setCustomerView("outlets");
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        customerView === "outlets" && selectedOutletId === null
+                          ? "bg-orange-500/10 text-orange-600 font-bold"
+                          : isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <Store size={14} className="text-zinc-400" />
+                      My Outlets
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setSelectedOutletId(null);
+                        setCustomerView("settings");
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        customerView === "settings"
+                          ? "bg-orange-500/10 text-orange-600 font-bold"
+                          : isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <User size={14} className="text-zinc-400" />
+                      Profile & Settings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setSelectedOutletId(null);
+                        setCustomerView("settings");
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                        isDark ? "text-zinc-300 hover:bg-zinc-800" : "text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                    >
+                      <KeyRound size={14} className="text-zinc-400" />
+                      Change Password
+                    </button>
+                  </div>
+
+                  <div className={`border-t pt-1 ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileDropdownOpen(false);
+                        setShowLogoutModal(true);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 transition"
+                    >
+                      <LogOut size={14} className="text-rose-500" />
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        {customerView === "settings" ? (
+          <div className="space-y-6 animate-in fade-in duration-150">
+            <div className={`flex items-center justify-between border-b pb-4 ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+              <div>
+                <h1 className={`text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
+                  Account & Profile Settings
+                </h1>
+                <p className="text-xs text-zinc-500 mt-1">
+                  Manage your personal details and security credentials.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomerView("outlets")}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  isDark
+                    ? "border-zinc-800 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                    : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700"
+                }`}
+              >
+                <ArrowLeft size={14} />
+                Back to Outlets
+              </button>
+            </div>
+
+            <AccountSettingsView
+              accessToken={accessToken}
+              profile={currentProfile}
+              onProfileUpdated={(updated) => {
+                setCurrentProfile(updated);
+              }}
+            />
+          </div>
+        ) : selectedOutletId === null ? (
+          /* =================================================================== */
+          /* OUTLETS HUB (GRID VIEW) - ELEVATED PREMIUM DESIGN                   */
+          /* =================================================================== */
+          <div className="space-y-6 animate-in fade-in duration-150">
+            {/* Page Header with Stats & Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h1 className={`text-2xl sm:text-3xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
+                    Restaurant Outlets
+                  </h1>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 text-xs font-semibold text-orange-600">
+                    <Sparkles className="w-3 h-3" />
+                    {outlets.length} {outlets.length === 1 ? "Outlet" : "Outlets"}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-zinc-500 mt-1 max-w-xl">
+                  Select an outlet to manage operations, view compliance, or launch the POS terminal.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className={`hidden md:flex items-center gap-3 rounded-xl border px-3.5 py-2 text-xs ${
+                  isDark ? "border-zinc-800 bg-zinc-900/60" : "border-zinc-200/80 bg-white"
+                }`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-zinc-500">Active:</span>
+                    <strong className={`font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {outlets.filter((o) => o.status === "active").length}
+                    </strong>
+                  </div>
+                  <span className="text-zinc-300 dark:text-zinc-700">|</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-zinc-500">Live POS:</span>
+                    <strong className={`font-bold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                      {outlets.filter((o) => o.isLive).length}
+                    </strong>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowPackageModal(true)}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold shadow-sm hover:shadow transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Register New Outlet</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Search when multiple outlets */}
+            {outlets.length > 2 && (
+              <div className="relative max-w-md">
+                <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Search outlet by name, city, or branch..."
+                  value={outletSearch}
+                  onChange={(e) => setOutletSearch(e.target.value)}
+                  className={`w-full rounded-xl border pl-10 pr-4 py-2 text-xs font-medium transition focus:outline-hidden focus:ring-2 focus:ring-orange-500 ${
+                    isDark
+                      ? "border-zinc-800 bg-zinc-900 text-zinc-100 placeholder:text-zinc-500 focus:border-zinc-700"
+                      : "border-zinc-200 bg-white text-zinc-900 placeholder:text-zinc-400 focus:border-orange-500"
+                  }`}
+                />
+                {outletSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setOutletSearch("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 hover:text-zinc-600"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Outlets Grid */}
+            {(() => {
+              const filteredOutlets = outlets.filter((outlet) => {
+                if (!outletSearch.trim()) return true;
+                const q = outletSearch.toLowerCase();
+                return (
+                  outlet.name.toLowerCase().includes(q) ||
+                  outlet.address?.city?.toLowerCase().includes(q) ||
+                  outlet.package?.toLowerCase().includes(q)
+                );
+              });
+
+              if (filteredOutlets.length === 0) {
+                return (
+                  <div className={`p-12 text-center rounded-2xl border border-dashed ${
+                    isDark ? "border-zinc-800 bg-zinc-900/40" : "border-zinc-300 bg-white"
+                  }`}>
+                    <Store className="w-10 h-10 text-zinc-500 mx-auto" />
+                    <h3 className={`mt-3 text-sm font-semibold ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                      {outletSearch ? "No matching outlets found" : "No outlets registered"}
+                    </h3>
+                    <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
+                      {outletSearch
+                        ? `No branches match "${outletSearch}". Try clearing your search.`
+                        : "Get started by registering your first restaurant branch with digital menu and POS workflows."}
+                    </p>
+                    {outletSearch ? (
+                      <button
+                        type="button"
+                        onClick={() => setOutletSearch("")}
+                        className="mt-4 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg border text-xs font-semibold"
+                      >
+                        Clear Search
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowPackageModal(true)}
+                        className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-600 text-white text-xs font-semibold shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Register First Outlet</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {filteredOutlets.map((outlet) => (
+                    <div
+                      key={outlet.id}
+                      className={`group flex flex-col justify-between rounded-2xl border p-5 shadow-xs transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
+                        isDark
+                          ? "border-zinc-800 bg-zinc-900/90 hover:border-zinc-700"
+                          : "border-zinc-200/90 bg-white hover:border-zinc-300 hover:shadow-orange-500/5"
+                      }`}
+                    >
+                      <div>
+                        {/* Top status bar */}
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
+                              outlet.status === "active"
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                : outlet.status === "pending"
+                                ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                : "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                            }`}
+                          >
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                outlet.status === "active"
+                                  ? "bg-emerald-500 animate-pulse"
+                                  : outlet.status === "pending"
+                                  ? "bg-amber-500"
+                                  : "bg-rose-500"
+                              }`}
+                            />
+                            <span>{outlet.statusLabel || (outlet.status === "active" ? "Active Outlet" : outlet.status)}</span>
+                          </span>
+
+                          <span className="inline-block text-[10px] font-bold text-orange-600 bg-orange-500/10 border border-orange-500/20 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                            {outlet.package?.replace("-", " ") || "Marinate"}
+                          </span>
+                        </div>
+
+                        {/* Outlet Info */}
+                        <div className="mt-4 flex items-start gap-3.5">
+                          <div className={`relative w-13 h-13 rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-2xs group-hover:scale-105 transition-transform ${
+                            isDark ? "border-zinc-800 bg-zinc-800" : "border-zinc-200 bg-zinc-50"
+                          }`}>
+                            {outlet.images?.logo_url?.public_url ? (
+                              <Image
+                                src={outlet.images.logo_url.public_url}
+                                alt={outlet.name}
+                                fill
+                                className="object-cover"
+                              />
+                            ) : (
+                              <Store className="w-6 h-6 text-orange-500" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className={`text-base font-bold truncate group-hover:text-orange-600 transition-colors ${
+                              isDark ? "text-zinc-100" : "text-zinc-900"
+                            }`}>
+                              {outlet.name}
+                            </h3>
+                            <div className="flex items-center gap-1 text-xs text-zinc-500 truncate mt-1">
+                              <MapPin className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+                              <span className="truncate">
+                                {outlet.address?.city
+                                  ? `${outlet.address.city}${outlet.address.pincode ? `, ${outlet.address.pincode}` : ""}`
+                                  : "Address pending"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Services badges */}
+                        <div className="mt-4 flex flex-wrap gap-1.5">
+                          {outlet.services.slice(0, 3).map((s) => (
+                            <span
+                              key={s}
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold capitalize border ${
+                                isDark
+                                  ? "bg-zinc-800/80 border-zinc-700/60 text-zinc-300"
+                                  : "bg-zinc-100/80 border-zinc-200/80 text-zinc-700"
+                              }`}
+                            >
+                              {s.replace("_", " ")}
+                            </span>
+                          ))}
+                          {outlet.services.length > 3 && (
+                            <span className={`px-2 py-1 rounded-md text-[11px] font-semibold border ${
+                              isDark
+                                ? "bg-zinc-800/80 border-zinc-700/60 text-zinc-400"
+                                : "bg-zinc-100/80 border-zinc-200/80 text-zinc-500"
+                            }`}>
+                              +{outlet.services.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bottom Actions */}
+                      <div className={`mt-6 pt-4 border-t flex items-center justify-between gap-2.5 ${
+                        isDark ? "border-zinc-800" : "border-zinc-100"
+                      }`}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedOutletId(outlet.id)}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-semibold text-xs py-2.5 px-3.5 shadow-xs shadow-orange-600/20 transition-all group/btn"
+                        >
+                          <span>Enter Workspace</span>
+                          <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover/btn:translate-x-0.5" />
+                        </button>
+
+                        {outlet.isLive ? (
+                          <a
+                            href={`https://${outlet.posDomain}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-xs font-semibold shadow-2xs transition ${
+                              isDark
+                                ? "border-zinc-700 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 hover:text-white"
+                                : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-800 hover:text-orange-600"
+                            }`}
+                          >
+                            <span>Open POS</span>
+                            <ExternalLink className="w-3 h-3 text-orange-600" />
+                          </a>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-2 rounded-xl ${
+                            isDark ? "bg-zinc-800/60 text-zinc-500" : "bg-zinc-100 text-zinc-400"
+                          }`}>
+                            Under Review
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        ) : (
+          /* =================================================================== */
+          /* DEDICATED BRANCH WORKSPACE                                          */
+          /* =================================================================== */
+          currentOutlet && (
+            <div className="space-y-6 animate-in fade-in duration-150">
+              {/* Back to Hub Navigation */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedOutletId(null)}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Outlets Hub</span>
+                </button>
+              </div>
+
+              {/* Outlet Header Card */}
+              <div className={`rounded-xl border p-6 shadow-xs ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className={`relative w-14 h-14 rounded-xl border flex items-center justify-center shrink-0 overflow-hidden shadow-xs ${isDark ? "bg-zinc-800 border-zinc-700" : "bg-zinc-50 border-zinc-200"}`}>
+                      {currentOutlet.images?.logo_url?.public_url ? (
+                        <Image
+                          src={currentOutlet.images.logo_url.public_url}
+                          alt={currentOutlet.name}
+                          fill
+                          className="object-cover"
+                        />
+                      ) : (
+                        <Store className="w-7 h-7 text-zinc-400" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <h1 className={`text-xl sm:text-2xl font-bold tracking-tight ${isDark ? "text-white" : "text-zinc-900"}`}>
+                          {currentOutlet.name}
+                        </h1>
+                        <span
+                          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                            currentOutlet.status === "active"
+                              ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                              : currentOutlet.status === "pending"
+                              ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                              : "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              currentOutlet.status === "active"
+                                ? "bg-emerald-500"
+                                : currentOutlet.status === "pending"
+                                ? "bg-amber-500"
+                                : "bg-rose-500"
+                            }`}
+                          />
+                          <span>{currentOutlet.statusLabel}</span>
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
+                        <span className="font-mono">{currentOutlet.domainUrl}</span>
+                        <span>&bull;</span>
+                        <span className="capitalize">{currentOutlet.package.replace("-", " ")} Plan</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    {!currentOutlet.isLive ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const appId = currentOutlet.rawApplication?.id || currentOutlet.id;
+                          router.push(`/onboarding?editApplicationId=${encodeURIComponent(appId)}`);
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold shadow-xs transition cursor-pointer ${
+                          isDark
+                            ? "bg-zinc-100 hover:bg-white text-zinc-900"
+                            : "bg-zinc-900 hover:bg-zinc-800 text-white"
+                        }`}
+                      >
+                        <Pencil size={13} />
+                        <span>Edit Application</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const restId = currentOutlet.rawRestaurant?.id || currentOutlet.id;
+                          router.push(`/onboarding?editRestaurantId=${encodeURIComponent(restId)}`);
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border text-xs font-semibold shadow-xs transition cursor-pointer ${
+                          isDark
+                            ? "border-zinc-700 hover:bg-zinc-800 text-zinc-200"
+                            : "border-zinc-200 hover:bg-zinc-50 text-zinc-800"
+                        }`}
+                      >
+                        <Pencil size={13} />
+                        <span>Edit Branch Info</span>
+                      </button>
+                    )}
+
+                    {currentOutlet.isLive && (
+                      <a
+                        href={`https://${currentOutlet.posDomain}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-xs font-medium text-white shadow-xs transition"
+                      >
+                        <Terminal className="w-3.5 h-3.5" />
+                        <span>Launch POS Terminal</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Horizontal Navigation Tabs (shadcn style) */}
+                <div className={`mt-8 border-t pt-3 flex items-center gap-1 overflow-x-auto ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("overview")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      activeTab === "overview"
+                        ? isDark ? "bg-zinc-800 text-white font-semibold" : "bg-zinc-100 text-zinc-900 font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("operations")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      activeTab === "operations"
+                        ? isDark ? "bg-zinc-800 text-white font-semibold" : "bg-zinc-100 text-zinc-900 font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    Operations & Services
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("compliance")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      activeTab === "compliance"
+                        ? isDark ? "bg-zinc-800 text-white font-semibold" : "bg-zinc-100 text-zinc-900 font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    Compliance & Legal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("location")}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                      activeTab === "location"
+                        ? isDark ? "bg-zinc-800 text-white font-semibold" : "bg-zinc-100 text-zinc-900 font-semibold"
+                        : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300"
+                    }`}
+                  >
+                    Location & Contact
+                  </button>
+                </div>
+              </div>
+
+              {/* Tab Contents */}
+              {activeTab === "overview" && (
+                <div className="space-y-5">
+                  {!currentOutlet.isLive && (
+                    <div className={`rounded-xl border p-4 flex items-start gap-3 ${isDark ? "border-amber-900/40 bg-amber-950/20 text-amber-300" : "border-amber-200/80 bg-amber-50/50 text-amber-900"}`}>
+                      <Clock className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                      <div>
+                        <h4 className="text-xs font-semibold">
+                          Application Under Verification
+                        </h4>
+                        <p className={`text-xs mt-0.5 leading-relaxed ${isDark ? "text-amber-400/80" : "text-amber-700/90"}`}>
+                          Your business documents (FSSAI, GSTIN, and PAN) are currently being reviewed by our operations team. You may update any data or replace documents anytime by clicking <strong>Edit Application</strong>.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* Endpoints Card */}
+                    <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                      <div className="flex items-center justify-between">
+                        <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Digital Access Endpoints</h3>
+                        <Globe className="w-4 h-4 text-zinc-400" />
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className={`p-3 rounded-lg border flex items-center justify-between ${isDark ? "bg-zinc-800/60 border-zinc-800" : "bg-zinc-50/70 border-zinc-100"}`}>
+                          <div>
+                            <div className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400">
+                              Customer Web Menu
+                            </div>
+                            <div className={`text-xs font-medium mt-0.5 font-mono ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                              https://{currentOutlet.domainUrl}
+                            </div>
+                          </div>
+                          <CopyButton text={`https://${currentOutlet.domainUrl}`} />
+                        </div>
+
+                        <div className={`p-3 rounded-lg border flex items-center justify-between ${isDark ? "bg-zinc-800/60 border-zinc-800" : "bg-zinc-50/70 border-zinc-100"}`}>
+                          <div>
+                            <div className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400">
+                              POS Terminal Endpoint
+                            </div>
+                            <div className={`text-xs font-medium mt-0.5 font-mono ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                              https://{currentOutlet.posDomain}
+                            </div>
+                          </div>
+                          <CopyButton text={`https://${currentOutlet.posDomain}`} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Operational Channels: Dine-in, Takeaway, Delivery, Catering (NO BAR) */}
+                    <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                      <div className="flex items-center justify-between">
+                        <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Active Order Channels</h3>
+                        <Utensils className="w-4 h-4 text-zinc-400" />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        {[
+                          { key: "dine_in", label: "Dine In" },
+                          { key: "takeaway", label: "Takeaway" },
+                          { key: "delivery", label: "Delivery" },
+                          { key: "catering", label: "Catering" },
+                        ].map(({ key, label }) => {
+                          const isEnabled = currentOutlet.services.includes(key);
+                          return (
+                            <div
+                              key={key}
+                              className={`p-3 rounded-lg border flex items-center gap-2 text-xs font-medium ${
+                                isEnabled
+                                  ? isDark
+                                    ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-400"
+                                    : "border-emerald-200 bg-emerald-50/40 text-emerald-800"
+                                  : isDark
+                                  ? "border-zinc-800 bg-zinc-800/40 text-zinc-500"
+                                  : "border-zinc-100 bg-zinc-50/60 text-zinc-400"
+                              }`}
+                            >
+                              <div
+                                className={`w-2 h-2 rounded-full ${
+                                  isEnabled ? "bg-emerald-500" : "bg-zinc-500"
+                                }`}
+                              />
+                              <span>{label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "operations" && (
+                <div className="space-y-5">
+                  <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                    <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Cuisines Served</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {currentOutlet.cuisines.length > 0 ? (
+                        currentOutlet.cuisines.map((c) => (
+                          <span
+                            key={c}
+                            className={`px-3 py-1 rounded-lg text-xs font-medium ${
+                              isDark
+                                ? "bg-orange-500/10 border border-orange-500/30 text-orange-400"
+                                : "bg-orange-50 border border-orange-200/60 text-orange-800"
+                            }`}
+                          >
+                            {c}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-zinc-400">No cuisines specified yet</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                    <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>Operating Timings</h3>
+                    {currentOutlet.timings?.hours ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {Object.entries(currentOutlet.timings.hours).map(([day, slots]) => (
+                          <div
+                            key={day}
+                            className={`p-3 rounded-lg border text-xs ${
+                              isDark
+                                ? "border-zinc-800 bg-zinc-800/50"
+                                : "border-zinc-100 bg-zinc-50/60"
+                            }`}
+                          >
+                            <span className={`font-semibold capitalize ${isDark ? "text-zinc-200" : "text-zinc-700"}`}>{day}</span>
+                            <div className="mt-1 text-zinc-400 font-mono">
+                              {slots && slots.length > 0
+                                ? slots.map((s) => `${s.open_time} - ${s.close_time}`).join(", ")
+                                : "Closed"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-zinc-500">Standard business hours configured.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "compliance" && (
+                <div className="space-y-6">
+                  {/* Legal & Banking Grid */}
+                  <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                    <div>
+                      <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                        Regulatory & Banking Details
+                      </h3>
+                      <p className="text-xs text-zinc-500 mt-0.5">
+                        KYC identifiers submitted for compliance verification and settlement processing.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
+                      <PropertyCard
+                        label="PAN Card Number"
+                        value={currentOutlet.legal.pan_number || "Not provided"}
+                        canCopy={Boolean(currentOutlet.legal.pan_number)}
+                        isDark={isDark}
+                      />
+                      <PropertyCard
+                        label="Name as on PAN"
+                        value={currentOutlet.legal.fullnameaspan || "Not provided"}
+                        isDark={isDark}
+                      />
+                      <PropertyCard
+                        label="FSSAI License"
+                        value={currentOutlet.legal.fssai_number || "Not provided"}
+                        canCopy={Boolean(currentOutlet.legal.fssai_number)}
+                        isDark={isDark}
+                      />
+                      <PropertyCard
+                        label="GSTIN Number"
+                        value={
+                          currentOutlet.legal.gst_number
+                            ? currentOutlet.legal.gst_number
+                            : currentOutlet.legal.gst === false
+                            ? "Not registered (Exempt)"
+                            : "Not provided"
+                        }
+                        canCopy={Boolean(currentOutlet.legal.gst_number)}
+                        isDark={isDark}
+                      />
+                      <BankCard
+                        accNo={currentOutlet.bank.bank_accno}
+                        type={currentOutlet.bank.account_type}
+                        isDark={isDark}
+                      />
+                      <PropertyCard
+                        label="Bank IFSC Code"
+                        value={currentOutlet.bank.ifsc_code || "Not provided"}
+                        canCopy={Boolean(currentOutlet.bank.ifsc_code)}
+                        isDark={isDark}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Verification Documents List */}
+                  <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className={`text-sm font-semibold ${isDark ? "text-white" : "text-zinc-900"}`}>
+                          Submitted Verification Documents
+                        </h3>
+                        <p className="text-xs text-zinc-500 mt-0.5">
+                          {currentOutlet.isLive
+                            ? "Verified compliance documents are locked. Contact Super Admin to request alterations."
+                            : "Documents can be replaced or removed while your application is under review."}
+                        </p>
+                      </div>
+                      <ShieldCheck className="w-4 h-4 text-zinc-400" />
+                    </div>
+
+                    {Object.keys(currentOutlet.documents).length === 0 ? (
+                      <p className="text-xs text-zinc-400 py-3">No compliance files uploaded yet.</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        {Object.entries(currentOutlet.documents).map(([docKey, docAsset]) => (
+                          <div
+                            key={docKey}
+                            className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
+                              isDark
+                                ? "border-zinc-800 bg-zinc-800/50"
+                                : "border-zinc-200/90 bg-zinc-50/50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 truncate">
+                              <FileCheck className="w-5 h-5 text-amber-500 shrink-0" />
+                              <div className="truncate">
+                                <div className={`text-xs font-semibold capitalize truncate ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+                                  {docKey.replace(/_/g, " ")}
+                                </div>
+                                <div className="text-[11px] text-zinc-400 truncate mt-0.5">
+                                  {docAsset.original_name || `${docKey}.pdf`}
+                                </div>
+                              </div>
+                            </div>
+
+                            {docAsset.public_url ? (
+                              <a
+                                href={docAsset.public_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium shadow-2xs shrink-0 transition ${
+                                  isDark
+                                    ? "border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200"
+                                    : "border-zinc-200 bg-white hover:bg-zinc-100 text-zinc-700"
+                                }`}
+                              >
+                                <span>View</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
+                              </a>
+                            ) : (
+                              <span className="text-xs text-zinc-400">Attached</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "location" && (
+                <div className="space-y-5">
+                  <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <MapPin className="w-4 h-4 text-orange-600" />
+                      <span className={isDark ? "text-white" : "text-zinc-900"}>Physical Address</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <PropertyCard label="Building / Premises" value={currentOutlet.address.buildingno || "N/A"} isDark={isDark} />
+                      <PropertyCard label="Floor" value={currentOutlet.address.floor || "N/A"} isDark={isDark} />
+                      <PropertyCard label="Area / Locality" value={currentOutlet.address.area || "N/A"} isDark={isDark} />
+                      <PropertyCard label="City" value={currentOutlet.address.city || "N/A"} isDark={isDark} />
+                      <PropertyCard label="Postal Code" value={currentOutlet.address.pincode || "N/A"} isDark={isDark} />
+                      <PropertyCard label="Landmark" value={currentOutlet.address.landmark || "N/A"} isDark={isDark} />
+                    </div>
+
+                    <div className="pt-2">
+                      <PropertyCard
+                        label="Registered Business Address"
+                        value={currentOutlet.address.registered_business_address || "N/A"}
+                        isDark={isDark}
+                      />
+                    </div>
+                  </div>
+
+                  <div className={`rounded-xl border p-5 shadow-xs space-y-4 ${isDark ? "bg-zinc-900/90 border-zinc-800" : "bg-white border-zinc-200/80"}`}>
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      <Phone className="w-4 h-4 text-orange-600" />
+                      <span className={isDark ? "text-white" : "text-zinc-900"}>Contact Details</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <PropertyCard label="Primary Phone" value={currentOutlet.phone || "N/A"} canCopy={Boolean(currentOutlet.phone)} isDark={isDark} />
+                      <PropertyCard label="Business Email" value={currentOutlet.email || "N/A"} canCopy={Boolean(currentOutlet.email)} isDark={isDark} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        )}
+      </main>
+
+      {/* =================================================================== */}
+      {/* PACKAGE SELECTION MODAL (BEFORE ONBOARDING)                         */}
+      {/* =================================================================== */}
+      {showPackageModal && (
+        <SelectPackageModal
+          isDark={isDark}
+          onClose={() => setShowPackageModal(false)}
+          onSelect={(pkgKey, services) => {
+            setShowPackageModal(false);
+            router.push(
+              `/onboarding?services=${encodeURIComponent(services.join(","))}&package=${encodeURIComponent(pkgKey)}`
+            );
+          }}
+        />
+      )}
+
+      {/* =================================================================== */}
+      {/* EDIT MODAL: COMPREHENSIVE PENDING APPLICATION EDITOR               */}
+      {/* =================================================================== */}
+      {isEditingPending && currentOutlet?.rawApplication && (
+        <EditPendingApplicationModal
+          application={currentOutlet.rawApplication}
+          accessToken={accessToken}
+          isDark={isDark}
+          onClose={() => setIsEditingPending(false)}
+          onSuccess={() => {
+            setIsEditingPending(false);
+            void loadData();
+          }}
+        />
+      )}
+
+      {/* =================================================================== */}
+      {/* EDIT MODAL: LIVE RESTAURANT INFO (LOCKED POS/DOMAIN, NO DOC REUPLOAD)*/}
+      {/* =================================================================== */}
+      {isEditingLive && currentOutlet?.rawRestaurant && (
+        <EditLiveRestaurantModal
+          restaurant={currentOutlet.rawRestaurant}
+          accessToken={accessToken}
+          isDark={isDark}
+          onClose={() => setIsEditingLive(false)}
+          onSuccess={() => {
+            setIsEditingLive(false);
+            void loadData();
+          }}
+        />
+      )}
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/60 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div className={`w-full max-w-sm rounded-2xl p-6 shadow-2xl border space-y-4 ${
+            isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"
+          }`}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-600 flex items-center justify-center shrink-0">
+                <LogOut className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold">Sign out of Marinate360?</h3>
+                <p className={`text-xs mt-1 leading-relaxed ${isDark ? "text-zinc-400" : "text-zinc-500"}`}>
+                  You are currently signed in as <span className="font-semibold">{profile?.email || initialUser?.email || "your account"}</span>. Are you sure you want to end your session?
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(false)}
+                className={`px-4 py-2 text-xs font-semibold rounded-xl transition ${
+                  isDark ? "bg-zinc-800 hover:bg-zinc-700 text-zinc-300" : "bg-zinc-100 hover:bg-zinc-200 text-zinc-700"
+                }`}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  void handleSignOut();
+                }}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers & Subcomponents
+// ---------------------------------------------------------------------------
+
+function PropertyCard({
+  label,
+  value,
+  canCopy = false,
+  isDark = false,
+}: {
+  label: string;
+  value: string;
+  canCopy?: boolean;
+  isDark?: boolean;
+}) {
+  return (
+    <div className={`p-3 rounded-lg border flex items-start justify-between gap-2 ${isDark ? "bg-zinc-800/60 border-zinc-800" : "bg-zinc-50/70 border-zinc-100"}`}>
+      <div className="min-w-0">
+        <div className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400">
+          {label}
+        </div>
+        <div className={`text-xs font-semibold mt-1 truncate ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>{value}</div>
+      </div>
+      {canCopy && <CopyButton text={value} />}
+    </div>
+  );
+}
+
+function BankCard({ accNo, type, isDark = false }: { accNo?: string; type?: string; isDark?: boolean }) {
+  const [showFull, setShowFull] = useState(false);
+
+  const clean = (accNo || "").trim();
+  const masked = clean.length > 4 ? `•••• •••• ${clean.slice(-4)}` : clean || "Not provided";
+
+  return (
+    <div className={`p-3 rounded-lg border flex items-start justify-between gap-2 ${isDark ? "bg-zinc-800/60 border-zinc-800" : "bg-zinc-50/70 border-zinc-100"}`}>
+      <div>
+        <div className="text-[10px] font-semibold tracking-wider uppercase text-zinc-400">
+          Bank Account ({type || "Current"})
+        </div>
+        <div className={`text-xs font-semibold mt-1 font-mono ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>
+          {showFull ? clean : masked}
+        </div>
+      </div>
+      {clean && (
+        <button
+          type="button"
+          onClick={() => setShowFull(!showFull)}
+          title={showFull ? "Hide Account Number" : "Show Account Number"}
+          className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+        >
+          {showFull ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title="Copy to clipboard"
+      className="p-1 rounded text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition shrink-0"
+    >
+      {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Component: Cuisine Selector (Checkbox/Pill style with custom cuisine adder)
+// ---------------------------------------------------------------------------
+
+function CuisineSelector({
+  selectedCuisines,
+  onChange,
+  isDark = false,
+}: {
+  selectedCuisines: string[];
+  onChange: (cuisines: string[]) => void;
+  isDark?: boolean;
+}) {
+  const [customInput, setCustomInput] = useState("");
+
+  const toggleCuisine = (cuisine: string) => {
+    const isSelected = selectedCuisines.some(
+      (c) => c.toLowerCase() === cuisine.toLowerCase()
     );
+    if (isSelected) {
+      onChange(selectedCuisines.filter((c) => c.toLowerCase() !== cuisine.toLowerCase()));
+    } else {
+      onChange([...selectedCuisines, cuisine]);
+    }
+  };
+
+  const addCustom = (e: React.FormEvent) => {
+    e.preventDefault();
+    const val = customInput.trim();
+    if (!val) return;
+    if (!selectedCuisines.some((c) => c.toLowerCase() === val.toLowerCase())) {
+      onChange([...selectedCuisines, val]);
+    }
+    setCustomInput("");
+  };
+
+  const customSelected = selectedCuisines.filter(
+    (c) => !STANDARD_CUISINES.some((sc) => sc.toLowerCase() === c.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>
+          Select Cuisines ({selectedCuisines.length} selected)
+        </label>
+        <span className="text-[10px] text-zinc-400">Click to toggle or add custom below</span>
+      </div>
+
+      {/* Preset Pill Grid */}
+      <div className={`flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-2 rounded-xl border ${isDark ? "border-zinc-800 bg-zinc-800/50" : "border-zinc-200 bg-zinc-50/60"}`}>
+        {STANDARD_CUISINES.map((cuisine) => {
+          const isSelected = selectedCuisines.some(
+            (c) => c.toLowerCase() === cuisine.toLowerCase()
+          );
+          return (
+            <button
+              key={cuisine}
+              type="button"
+              onClick={() => toggleCuisine(cuisine)}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border ${
+                isSelected
+                  ? "bg-orange-500 text-white border-orange-500 shadow-2xs"
+                  : isDark
+                  ? "bg-zinc-800 text-zinc-300 border-zinc-700 hover:border-zinc-600 hover:bg-zinc-700/60"
+                  : "bg-white text-zinc-700 border-zinc-200 hover:border-zinc-300 hover:bg-zinc-100/60"
+              }`}
+            >
+              {isSelected && <Check className="w-3 h-3" />}
+              <span>{cuisine}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Custom Selected Cuisines Badges */}
+      {customSelected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {customSelected.map((c) => (
+            <span
+              key={c}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-medium ${
+                isDark
+                  ? "bg-orange-950/40 text-orange-300 border-orange-800/60"
+                  : "bg-orange-100/80 text-orange-900 border-orange-200"
+              }`}
+            >
+              <span>{c}</span>
+              <button
+                type="button"
+                onClick={() => toggleCuisine(c)}
+                className="hover:text-rose-500 transition"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Custom Cuisine Input */}
+      <div className="flex items-center gap-2 pt-1">
+        <input
+          type="text"
+          placeholder="Add custom cuisine (e.g. Arabian Mandi, Mughlai, Bakery)..."
+          value={customInput}
+          onChange={(e) => setCustomInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addCustom(e);
+            }
+          }}
+          className={`flex-1 px-3 py-1.5 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${
+            isDark
+              ? "bg-zinc-800 border-zinc-700 text-zinc-100 placeholder:text-zinc-500"
+              : "bg-white border-zinc-200 text-zinc-900"
+          }`}
+        />
+        <button
+          type="button"
+          onClick={addCustom}
+          disabled={!customInput.trim()}
+          className="px-3 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white text-xs font-medium transition"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modal: Package Selection (Before Entering Registration)
+// ---------------------------------------------------------------------------
+
+function SelectPackageModal({
+  onClose,
+  onSelect,
+  isDark = false,
+}: {
+  onClose: () => void;
+  onSelect: (pkgKey: keyof typeof PACKAGES, services: string[]) => void;
+  isDark?: boolean;
+}) {
+  const [selectedKey, setSelectedKey] = useState<keyof typeof PACKAGES>("marinate-menu");
+
+  const selected = PACKAGES[selectedKey];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/75 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className={`w-full max-w-2xl rounded-2xl shadow-2xl border overflow-hidden flex flex-col ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}>
+        {/* Header */}
+        <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+          <div>
+            <h2 className="text-base font-bold">Select Restaurant Package</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Choose the package that aligns with this outlet's ordering and operational model.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Packages Grid */}
+        <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-3.5 overflow-y-auto max-h-[60vh]">
+          {(Object.entries(PACKAGES) as Array<[keyof typeof PACKAGES, typeof PACKAGES[keyof typeof PACKAGES]]>).map(
+            ([key, pkg]) => {
+              const isSelected = selectedKey === key;
+              return (
+                <div
+                  key={key}
+                  onClick={() => setSelectedKey(key)}
+                  className={`p-4 rounded-xl border-2 cursor-pointer transition-all flex flex-col justify-between ${
+                    isSelected
+                      ? "border-orange-500 bg-orange-500/10 shadow-xs"
+                      : isDark
+                      ? "border-zinc-800 hover:border-zinc-700 bg-zinc-800/40"
+                      : "border-zinc-200 hover:border-zinc-300 bg-white"
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-orange-500">
+                        {pkg.badge}
+                      </span>
+                      <div
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                          isSelected
+                            ? "border-orange-500 bg-orange-500 text-white"
+                            : isDark
+                            ? "border-zinc-600"
+                            : "border-zinc-300"
+                        }`}
+                      >
+                        {isSelected && <Check className="w-2.5 h-2.5" />}
+                      </div>
+                    </div>
+
+                    <h3 className="text-base font-bold mt-1">{pkg.label}</h3>
+                    <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{pkg.summary}</p>
+                  </div>
+
+                  <ul className={`mt-4 pt-3 border-t space-y-1.5 ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+                    {pkg.points.map((pt) => (
+                      <li key={pt} className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+                        <Check className="w-3 h-3 text-emerald-500 shrink-0" />
+                        <span>{pt}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            }
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className={`px-6 py-4 border-t flex items-center justify-end gap-2.5 ${isDark ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-zinc-50"}`}>
+          <button
+            type="button"
+            onClick={onClose}
+            className={`px-4 py-2 rounded-lg border text-xs font-medium transition ${isDark ? "border-zinc-700 hover:bg-zinc-800 text-zinc-300" : "border-zinc-200 hover:bg-white text-zinc-700"}`}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelect(selectedKey, [...selected.services])}
+            className="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-xs font-semibold text-white shadow-xs transition"
+          >
+            Continue to Registration →
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modal: Full Comprehensive Pending Application Editor
+// ---------------------------------------------------------------------------
+
+function EditPendingApplicationModal({
+  application,
+  accessToken,
+  onClose,
+  onSuccess,
+  isDark = false,
+}: {
+  application: OnboardingApplication;
+  accessToken: string;
+  onClose: () => void;
+  onSuccess: () => void;
+  isDark?: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const addr = (application.address || {}) as Record<string, string>;
+  const leg = (application.legal || {}) as Record<string, string>;
+  const bnk = (application.bank || {}) as Record<string, string>;
+
+  // Form states
+  const [restaurantName, setRestaurantName] = useState(application.restaurant_name || "");
+  const [ownerName, setOwnerName] = useState(application.owner_name || "");
+  const [phone, setPhone] = useState(application.phone || "");
+  const [primaryContact, setPrimaryContact] = useState(application.restaurant_primary_contact || "");
+  const [cuisines, setCuisines] = useState<string[]>(
+    Array.isArray(application.cuisines) ? application.cuisines : []
+  );
+  const [services, setServices] = useState(
+    Array.isArray(application.services) ? application.services.join(", ") : ""
+  );
+
+  // Address
+  const [building, setBuilding] = useState(addr.buildingno || "");
+  const [floor, setFloor] = useState(addr.floor || "");
+  const [area, setArea] = useState(addr.area || "");
+  const [city, setCity] = useState(addr.city || "");
+  const [pincode, setPincode] = useState(addr.pincode || "");
+  const [landmark, setLandmark] = useState(addr.landmark || "");
+  const [registeredAddress, setRegisteredAddress] = useState(addr.registered_business_address || "");
+
+  // Legal & Bank
+  const [panNumber, setPanNumber] = useState(leg.pan_number || "");
+  const [panName, setPanName] = useState(leg.fullnameaspan || "");
+  const [gstNumber, setGstNumber] = useState(leg.gst_number || "");
+  const [fssaiNumber, setFssaiNumber] = useState(leg.fssai_number || "");
+  const [fssaiExpiry, setFssaiExpiry] = useState(leg.fssai_expiry || "");
+  const [bankAccount, setBankAccount] = useState(bnk.bank_accno || "");
+  const [ifscCode, setIfscCode] = useState(bnk.ifsc_code || "");
+  const [accountType, setAccountType] = useState(bnk.account_type || "Current");
+
+  // File uploads
+  const [newPanFile, setNewPanFile] = useState<File | null>(null);
+  const [newGstFile, setNewGstFile] = useState<File | null>(null);
+  const [newFssaiFile, setNewFssaiFile] = useState<File | null>(null);
+  const [newLogoFile, setNewLogoFile] = useState<File | null>(null);
+  const [removeKeys, setRemoveKeys] = useState<string[]>([]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setErrorMsg("");
+
+    try {
+      const payload = {
+        restaurant_name: restaurantName.trim(),
+        owner_name: ownerName.trim(),
+        phone: phone.trim(),
+        restaurant_primary_contact: primaryContact.trim(),
+        address: {
+          buildingno: building.trim(),
+          floor: floor.trim(),
+          area: area.trim(),
+          city: city.trim(),
+          pincode: pincode.trim(),
+          landmark: landmark.trim(),
+          registered_business_address: registeredAddress.trim(),
+        },
+        legal: {
+          pan_number: panNumber.trim(),
+          fullnameaspan: panName.trim(),
+          gst: Boolean(gstNumber.trim()),
+          gst_number: gstNumber.trim() || null,
+          fssai_number: fssaiNumber.trim(),
+          fssai_expiry: fssaiExpiry.trim(),
+        },
+        bank: {
+          bank_accno: bankAccount.trim(),
+          ifsc_code: ifscCode.trim(),
+          account_type: accountType.trim(),
+        },
+        cuisines: cuisines.map((c) => c.trim()).filter(Boolean),
+        services: services.split(",").map((s) => s.trim()).filter(Boolean),
+      };
+
+      const fd = new FormData();
+      fd.append("accessToken", accessToken);
+      fd.append("applicationId", application.id);
+      fd.append("payload", JSON.stringify(payload));
+      fd.append("remove_keys", JSON.stringify(removeKeys));
+
+      if (newPanFile) fd.append("pan_card", newPanFile);
+      if (newGstFile) fd.append("gst_certificate", newGstFile);
+      if (newFssaiFile) fd.append("fssai_license", newFssaiFile);
+      if (newLogoFile) fd.append("logo_url", newLogoFile);
+
+      const res = await updateMyOnboardingApplicationWithFormData(fd);
+      if (!res.ok) {
+        throw new Error(res.error || "Failed to update application");
+      }
+
+      // Close modal immediately upon completion and reload
+      onSuccess();
+    } catch (err: any) {
+      setErrorMsg(err.message || "An unexpected error occurred while saving.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/75 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className={`w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl border flex flex-col overflow-hidden ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}>
+        {/* Modal Header */}
+        <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+          <div>
+            <h2 className="text-base font-bold">Edit Application Details</h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Update your business info and replace verification documents while under review.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Section 1: Restaurant & Owner */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              1. Restaurant & Owner Identity
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Restaurant Name</label>
+                <input
+                  type="text"
+                  value={restaurantName}
+                  onChange={(e) => setRestaurantName(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Owner Full Name</label>
+                <input
+                  type="text"
+                  value={ownerName}
+                  onChange={(e) => setOwnerName(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Phone</label>
+                <input
+                  type="text"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Primary Contact Person</label>
+                <input
+                  type="text"
+                  value={primaryContact}
+                  onChange={(e) => setPrimaryContact(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+            </div>
+
+            {/* Interactive Cuisine Selector */}
+            <div className="pt-2">
+              <CuisineSelector
+                selectedCuisines={cuisines}
+                onChange={setCuisines}
+                isDark={isDark}
+              />
+            </div>
+          </div>
+
+          {/* Section 2: Address */}
+          <div className={`space-y-3 pt-2 border-t ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              2. Physical Address
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Building / Door No.</label>
+                <input
+                  type="text"
+                  value={building}
+                  onChange={(e) => setBuilding(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Floor</label>
+                <input
+                  type="text"
+                  value={floor}
+                  onChange={(e) => setFloor(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Area / Locality</label>
+                <input
+                  type="text"
+                  value={area}
+                  onChange={(e) => setArea(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>City</label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Pincode</label>
+                <input
+                  type="text"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Landmark</label>
+                <input
+                  type="text"
+                  value={landmark}
+                  onChange={(e) => setLandmark(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div className="sm:col-span-3">
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Full Business Address</label>
+                <input
+                  type="text"
+                  value={registeredAddress}
+                  onChange={(e) => setRegisteredAddress(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Legal & Tax */}
+          <div className={`space-y-3 pt-2 border-t ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              3. Legal & Regulatory Credentials
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>PAN Card Number</label>
+                <input
+                  type="text"
+                  value={panNumber}
+                  onChange={(e) => setPanNumber(e.target.value.toUpperCase())}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Name as on PAN</label>
+                <input
+                  type="text"
+                  value={panName}
+                  onChange={(e) => setPanName(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>FSSAI License Number</label>
+                <input
+                  type="text"
+                  value={fssaiNumber}
+                  onChange={(e) => setFssaiNumber(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>GSTIN Number (optional)</label>
+                <input
+                  type="text"
+                  value={gstNumber}
+                  onChange={(e) => setGstNumber(e.target.value.toUpperCase())}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                  placeholder="Leave empty if not registered"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 4: Bank Account */}
+          <div className={`space-y-3 pt-2 border-t ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              4. Payout Bank Account
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="sm:col-span-2">
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Bank Account Number</label>
+                <input
+                  type="text"
+                  value={bankAccount}
+                  onChange={(e) => setBankAccount(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 font-mono ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>IFSC Code</label>
+                <input
+                  type="text"
+                  value={ifscCode}
+                  onChange={(e) => setIfscCode(e.target.value.toUpperCase())}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 font-mono ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 5: Document Replacement */}
+          <div className={`space-y-3 pt-2 border-t ${isDark ? "border-zinc-800" : "border-zinc-100"}`}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+                5. Compliance Documents & Certificates
+              </h3>
+              <span className="text-[11px] text-zinc-400">Attach new file to replace</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <DocUploader
+                label="PAN Card"
+                currentFile={application.documents?.pan_card?.original_name}
+                file={newPanFile}
+                onFileChange={setNewPanFile}
+                isDark={isDark}
+              />
+              <DocUploader
+                label="FSSAI License"
+                currentFile={application.documents?.fssai_license?.original_name}
+                file={newFssaiFile}
+                onFileChange={setNewFssaiFile}
+                isDark={isDark}
+              />
+              <DocUploader
+                label="GST Certificate"
+                currentFile={application.documents?.gst_certificate?.original_name}
+                file={newGstFile}
+                onFileChange={setNewGstFile}
+                isDark={isDark}
+              />
+              <DocUploader
+                label="Restaurant Logo"
+                currentFile={application.images?.logo_url?.original_name}
+                file={newLogoFile}
+                onFileChange={setNewLogoFile}
+                isDark={isDark}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Footer with visible sticky error banner */}
+        <div className={`px-6 py-4 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isDark ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-zinc-50"}`}>
+          <div className="flex-1">
+            {errorMsg && (
+              <div className="text-xs text-rose-500 font-medium flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2.5 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`px-4 py-2 rounded-lg border text-xs font-medium transition ${isDark ? "border-zinc-700 hover:bg-zinc-800 text-zinc-300" : "border-zinc-200 hover:bg-white text-zinc-700"}`}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-xs font-medium text-white shadow-xs transition disabled:opacity-50"
+            >
+              {saving ? "Saving Updates..." : "Save Application Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DocUploader({
+  label,
+  currentFile,
+  file,
+  onFileChange,
+  isDark = false,
+}: {
+  label: string;
+  currentFile?: string;
+  file: File | null;
+  onFileChange: (f: File | null) => void;
+  isDark?: boolean;
+}) {
+  return (
+    <div className={`p-3 rounded-lg border space-y-2 ${isDark ? "border-zinc-800 bg-zinc-800/40" : "border-zinc-200 bg-zinc-50/50"}`}>
+      <div className="flex items-center justify-between">
+        <span className={`text-xs font-semibold ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>{label}</span>
+        {currentFile && (
+          <span className="text-[10px] text-zinc-400 truncate max-w-[120px]">
+            Current: {currentFile}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="flex-1 cursor-pointer">
+          <input
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                onFileChange(e.target.files[0]);
+              }
+            }}
+          />
+          <div className={`px-3 py-1.5 rounded-md border text-xs font-medium flex items-center gap-1.5 truncate ${
+            isDark
+              ? "border-zinc-700 bg-zinc-800 hover:bg-zinc-700/80 text-zinc-200"
+              : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700"
+          }`}>
+            <Upload className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+            <span className="truncate">{file ? file.name : "Select replacement file"}</span>
+          </div>
+        </label>
+        {file && (
+          <button
+            type="button"
+            onClick={() => onFileChange(null)}
+            className="p-1.5 text-zinc-400 hover:text-rose-500 transition"
+            title="Clear selection"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modal: Live Restaurant Info Editor (Locked POS / Domain, No Doc Reupload)
+// ---------------------------------------------------------------------------
+
+function EditLiveRestaurantModal({
+  restaurant,
+  accessToken,
+  onClose,
+  onSuccess,
+  isDark = false,
+}: {
+  restaurant: RestaurantRecord;
+  accessToken: string;
+  onClose: () => void;
+  onSuccess: () => void;
+  isDark?: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  let addrObj: any = {};
+  if (typeof restaurant.address === "object" && restaurant.address !== null) {
+    addrObj = restaurant.address;
+  } else if (typeof restaurant.address === "string") {
+    try {
+      addrObj = JSON.parse(restaurant.address);
+    } catch {
+      addrObj = {};
+    }
+  }
+  const addr = addrObj as Record<string, string>;
+
+  const [restaurantName, setRestaurantName] = useState(restaurant.restaurant_name || "");
+  const [contact, setContact] = useState(String(restaurant.contact || ""));
+  const [email, setEmail] = useState(restaurant.email || "");
+  const [about, setAbout] = useState(restaurant.about || restaurant.description || "");
+  const [cuisines, setCuisines] = useState<string[]>(
+    Array.isArray(restaurant.cuisines) ? restaurant.cuisines : []
+  );
+
+  const [city, setCity] = useState(addr.city || "");
+  const [pincode, setPincode] = useState(addr.pincode || "");
+  const [registeredAddress, setRegisteredAddress] = useState(
+    addr.address_line_1 || addr.registered_business_address || (typeof restaurant.address === "string" ? restaurant.address : "")
+  );
+
+  const handleSave = async () => {
+    setSaving(true);
+    setErrorMsg("");
+
+    try {
+      const payload = {
+        restaurant_name: restaurantName.trim(),
+        contact: String(contact).trim(),
+        email: email.trim(),
+        about: about.trim(),
+        description: about.trim(),
+        address: {
+          ...addr,
+          city: city.trim(),
+          pincode: pincode.trim(),
+          registered_business_address: registeredAddress.trim(),
+        },
+        cuisines: cuisines.map((c) => c.trim()).filter(Boolean),
+      };
+
+      const fd = new FormData();
+      fd.append("accessToken", accessToken);
+      fd.append("restaurantId", restaurant.id);
+      fd.append("payload", JSON.stringify(payload));
+
+      const res = await updateRestaurantWithFormData(fd);
+      if (!res.ok) {
+        throw new Error(res.error || "Failed to update restaurant info");
+      }
+
+      onSuccess();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to update restaurant details.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/75 backdrop-blur-xs animate-in fade-in duration-150">
+      <div className={`w-full max-w-2xl rounded-2xl shadow-2xl border flex flex-col overflow-hidden ${isDark ? "bg-zinc-900 border-zinc-800 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}>
+        {/* Header */}
+        <div className={`px-6 py-4 border-b flex items-center justify-between ${isDark ? "border-zinc-800" : "border-zinc-200"}`}>
+          <div>
+            <h2 className="text-base font-bold">Edit Branch Information</h2>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Update operational details for {restaurant.restaurant_name}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 rounded-lg text-zinc-400 hover:text-zinc-200 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh]">
+          {/* Locked Endpoints Notice */}
+          <div className={`p-3.5 rounded-xl border flex items-start gap-3 ${isDark ? "border-zinc-800 bg-zinc-800/40" : "border-zinc-200 bg-zinc-50"}`}>
+            <Lock className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
+            <div className="text-xs text-zinc-400">
+              <span className={`font-semibold ${isDark ? "text-zinc-200" : "text-zinc-800"}`}>Platform Managed Endpoints</span>
+              <p className="mt-0.5">
+                POS domain (<code>{restaurant.pos_domain || "pos.marinate360.com"}</code>) and Food Ordering URL are locked and managed by the Marinate360 Super Admin.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Restaurant Name</label>
+              <input
+                type="text"
+                value={restaurantName}
+                onChange={(e) => setRestaurantName(e.target.value)}
+                className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Primary Contact Phone</label>
+                <input
+                  type="text"
+                  value={contact}
+                  onChange={(e) => setContact(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Business Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+            </div>
+
+            {/* Interactive Cuisine Selector */}
+            <CuisineSelector
+              selectedCuisines={cuisines}
+              onChange={setCuisines}
+              isDark={isDark}
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>City</label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+              <div>
+                <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Pincode</label>
+                <input
+                  type="text"
+                  value={pincode}
+                  onChange={(e) => setPincode(e.target.value)}
+                  className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>Address Details</label>
+              <input
+                type="text"
+                value={registeredAddress}
+                onChange={(e) => setRegisteredAddress(e.target.value)}
+                className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+              />
+            </div>
+
+            <div>
+              <label className={`text-xs font-medium ${isDark ? "text-zinc-300" : "text-zinc-700"}`}>About / Description</label>
+              <textarea
+                rows={3}
+                value={about}
+                onChange={(e) => setAbout(e.target.value)}
+                className={`mt-1 w-full px-3 py-2 text-xs rounded-lg border focus:outline-none focus:border-orange-500 ${isDark ? "bg-zinc-800 border-zinc-700 text-zinc-100" : "bg-white border-zinc-200 text-zinc-900"}`}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className={`px-6 py-4 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isDark ? "border-zinc-800 bg-zinc-900" : "border-zinc-200 bg-zinc-50"}`}>
+          <div className="flex-1">
+            {errorMsg && (
+              <div className="text-xs text-rose-500 font-medium flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2.5 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`px-4 py-2 rounded-lg border text-xs font-medium transition ${isDark ? "border-zinc-700 hover:bg-zinc-800 text-zinc-300" : "border-zinc-200 hover:bg-white text-zinc-700"}`}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2 rounded-lg bg-orange-600 hover:bg-orange-700 text-xs font-medium text-white shadow-xs transition disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
