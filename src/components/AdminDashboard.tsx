@@ -381,7 +381,7 @@ export default function AdminDashboard({
 
   async function handleAddSetting(definition: RestaurantSettingDefinition) {
     if (!selectedRestaurant) return;
-    const result = await upsertRestaurantSetting(accessToken, selectedRestaurant.id, definition.key, defaultSettingValue(definition.type));
+    const result = await upsertRestaurantSetting(accessToken, selectedRestaurant.id, definition.key, defaultSettingValue(definition));
     if (!result.ok) {
       toast.error(result.error);
       return;
@@ -955,9 +955,14 @@ function filterRestaurants(restaurants: RestaurantRecord[], search: string) {
   );
 }
 
-function defaultSettingValue(type: RestaurantSettingDefinition["type"]) {
+function defaultSettingValue(definition: RestaurantSettingDefinition | RestaurantSettingDefinition["type"]) {
+  if (typeof definition === "object" && definition.defaultValue !== undefined) {
+    return definition.defaultValue;
+  }
+  const type = typeof definition === "string" ? definition : definition.type;
   if (type === "boolean") return "true";
   if (type === "number") return "0";
+  if (type === "json") return "{}";
   return "";
 }
 
@@ -2251,7 +2256,7 @@ function RestaurantWorkspace({
           ) : (
             <div className="space-y-5">
               <div>
-                <h4 className="text-sm font-semibold text-zinc-800">Current 21-key settings</h4>
+                <h4 className="text-sm font-semibold text-zinc-800">Current {RESTAURANT_SETTING_DEFINITIONS.length}-key settings</h4>
                 <p className="mt-1 text-sm text-zinc-500">Only the approved setting keys can be present. Add missing ones or remove existing ones from here.</p>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -2312,7 +2317,7 @@ function SettingCard({
   onUpdate: (value: string) => void;
   onRemove: () => void;
 }) {
-  const [value, setValue] = useState(currentSetting?.setting_value ?? defaultSettingValue(definition.type));
+  const [value, setValue] = useState(currentSetting?.setting_value ?? defaultSettingValue(definition));
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -2332,7 +2337,7 @@ function SettingCard({
         )}
       </div>
 
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-4 flex flex-col gap-2">
         {definition.type === "boolean" ? (
           <select
             aria-label={definition.label}
@@ -2344,6 +2349,15 @@ function SettingCard({
             <option value="true">true</option>
             <option value="false">false</option>
           </select>
+        ) : definition.type === "json" ? (
+          <textarea
+            aria-label={definition.label}
+            disabled={!currentSetting}
+            rows={3}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            className="w-full rounded-md border border-zinc-200 px-3 py-2 text-xs font-mono outline-none focus:border-orange-500 disabled:bg-zinc-100"
+          />
         ) : (
           <input
             aria-label={definition.label}
@@ -2355,9 +2369,11 @@ function SettingCard({
           />
         )}
         {currentSetting ? (
-          <button onClick={() => onUpdate(value)} className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-semibold text-white hover:bg-zinc-800">
-            Save
-          </button>
+          <div className="flex justify-end">
+            <button onClick={() => onUpdate(value)} className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-zinc-800">
+              Save
+            </button>
+          </div>
         ) : null}
       </div>
     </div>

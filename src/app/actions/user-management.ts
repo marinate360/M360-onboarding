@@ -83,12 +83,31 @@ export async function listManagedUsers(
         }
       }
 
-      const [{ data: profilesData, error: profilesError }, { data: restaurantsData }] = await Promise.all([
-        query,
-        admin.from("restaurants").select("id, restaurant_name, domain_name"),
-      ]);
+      const [profilesData, restaurantsData] = await Promise.all([
+        fetchAllPaginatedRows<any>((from, to) => {
+          let q = admin
+            .from("profiles")
+            .select("id, email, username, first_name, last_name, phone, role, restaurant_id, created_at, updated_at")
+            .in("role", isStaff ? ["admin"] : ["admin", "staff", "super_admin"])
+            .order("created_at", { ascending: false });
 
-      if (profilesError) throw new Error(profilesError.message);
+          if (!isStaff && params?.role && params.role !== "all") {
+            q = q.eq("role", params.role);
+          }
+
+          if (params?.restaurantId && params.restaurantId !== "all") {
+            if (params.restaurantId === "unassigned") {
+              q = q.is("restaurant_id", null);
+            } else {
+              q = q.eq("restaurant_id", params.restaurantId);
+            }
+          }
+          return q.range(from, to);
+        }),
+        fetchAllPaginatedRows<any>((from, to) =>
+          admin.from("restaurants").select("id, restaurant_name, domain_name").range(from, to)
+        ),
+      ]);
 
       const restaurantMap = new Map(
         (restaurantsData ?? []).map((r: any) => [r.id, r])

@@ -22,6 +22,7 @@ import { writeAuditLog, loggedAction } from "./app-logs";
 import { formatAddress, buildStructuredAddress, parseStructuredAddress } from "@/src/lib/utils/address";
 import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { getServicesForPackage } from "@/src/lib/constants/restaurant-options";
+import { createSaasTenant, deleteSaasTenant } from "./saas-domains";
 
 export type RestaurantRecord = {
   id: string;
@@ -171,32 +172,19 @@ async function getAvailableDomainName(baseName: string): Promise<string> {
 
 async function checkUrlCollisions(
   domainUrl: string | null | undefined,
-  posDomain: string | null | undefined,
+  _posDomain?: string | null | undefined,
   excludeRestaurantId?: string
 ) {
-  if (!domainUrl && !posDomain) return;
+  if (!domainUrl) return;
   const admin = getSupabaseAdmin();
 
-  if (domainUrl) {
-    let query = admin.from("restaurants").select("id, restaurant_name").eq("domain_url", domainUrl);
-    if (excludeRestaurantId) {
-      query = query.neq("id", excludeRestaurantId);
-    }
-    const { data } = await query.maybeSingle();
-    if (data) {
-      throw new Error(`Food Ordering App URL "${domainUrl}" is already present with another restaurant (${data.restaurant_name}).`);
-    }
+  let query = admin.from("restaurants").select("id, restaurant_name").eq("domain_url", domainUrl);
+  if (excludeRestaurantId) {
+    query = query.neq("id", excludeRestaurantId);
   }
-
-  if (posDomain) {
-    let query = admin.from("restaurants").select("id, restaurant_name").eq("pos_domain", posDomain);
-    if (excludeRestaurantId) {
-      query = query.neq("id", excludeRestaurantId);
-    }
-    const { data } = await query.maybeSingle();
-    if (data) {
-      throw new Error(`POS Domain "${posDomain}" is already present with another restaurant (${data.restaurant_name}).`);
-    }
+  const { data } = await query.maybeSingle();
+  if (data) {
+    throw new Error(`Food Ordering App URL "${domainUrl}" is already present with another restaurant (${data.restaurant_name}).`);
   }
 }
 
@@ -290,6 +278,14 @@ export async function approveOnboardingApplication(
       }
 
       if (restaurantError || !restaurant) throw new Error(restaurantError?.message || "Failed to create restaurant.");
+
+      // Automatically register edge routing on SaaS API
+      try {
+        await createSaasTenant(cleanDomain);
+      } catch (saasErr) {
+        console.warn("[SaaS] Failed to register tenant on approval:", saasErr);
+      }
+
 
       ctx.restaurantId = restaurant.id;
       await insertRestaurantImageRecords(restaurant.id, allAssets);
@@ -651,8 +647,8 @@ export async function createRestaurantWithFormData(
       const defaultDomainUrl = payload.domain_url?.trim() || `${domainName}.marinate360.com`;
       const defaultPosDomain = payload.pos_domain?.trim() || `pos.marinate360.com`;
 
-      // Check collision
-      await checkUrlCollisions(defaultDomainUrl, defaultPosDomain);
+      // Check collision on domain_url only
+      await checkUrlCollisions(defaultDomainUrl);
 
       // Handle file uploads
       const uploadedAssets: StoredAsset[] = [];
@@ -852,16 +848,13 @@ export async function createRestaurantWithFormData(
         }
       }
 
-      // Resilient fallback storage in restaurant_settings
+
+      // Automatically register edge routing on SaaS API
       try {
-        await admin.from("restaurant_settings").upsert({
-          restaurant_id: data.id,
-          setting_key: "other_info",
-          setting_value: JSON.stringify(otherInfoToSave),
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "restaurant_id,setting_key" });
-      } catch (settingsErr) {
-        console.warn("Could not save other_info to restaurant_settings on creation:", settingsErr);
+        const subdomainToRegister = domainName.toLowerCase().trim();
+        await createSaasTenant(subdomainToRegister);
+      } catch (saasErr) {
+        console.warn("[SaaS] Failed to register tenant on direct creation:", saasErr);
       }
 
       void writeAuditLog({
@@ -964,9 +957,9 @@ export async function updateRestaurantWithFormData(
 
       const domainName = (existing.domain_name || slugify(payload.restaurant_name)).toLowerCase().trim();
 
-      // Check collision on domain_url and pos_domain
-      if (payload.domain_url || payload.pos_domain) {
-        await checkUrlCollisions(payload.domain_url, payload.pos_domain, restaurantId);
+      // Check collision on domain_url only
+      if (payload.domain_url) {
+        await checkUrlCollisions(payload.domain_url, undefined, restaurantId);
       }
 
       // Handle deleted files
@@ -1080,16 +1073,11 @@ export async function updateRestaurantWithFormData(
 
       if (error) throw new Error(error.message);
 
-      // Resilient fallback storage in restaurant_settings
+      // Ensure other_info is NOT stored in restaurant_settings
       try {
-        await admin.from("restaurant_settings").upsert({
-          restaurant_id: restaurantId,
-          setting_key: "other_info",
-          setting_value: JSON.stringify(otherInfoToSave),
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "restaurant_id,setting_key" });
+        await admin.from("restaurant_settings").delete().eq("restaurant_id", restaurantId).eq("setting_key", "other_info");
       } catch (settingsErr) {
-        console.warn("Could not save to restaurant_settings:", settingsErr);
+        console.warn("Could not clean other_info from restaurant_settings:", settingsErr);
       }
 
       if (payload.fullname) {
@@ -1244,10 +1232,33 @@ export async function deleteRestaurantRecord(
 
       const admin = getSupabaseAdmin();
 
+      // Retrieve existing domain_name and domain_url for SaaS cleanup
+      const { data: existingRest } = await admin
+        .from("restaurants")
+        .select("domain_name, domain_url")
+        .eq("id", restaurantId)
+        .maybeSingle();
+
       // Proactively clean up images from storage bucket
       const images = await listRestaurantImages(restaurantId);
       for (const img of images) {
         await deleteRestaurantAsset(img.storage_path);
+      }
+
+      // Cleanup edge routing on SaaS API
+      if (existingRest?.domain_name) {
+        try {
+          await deleteSaasTenant(existingRest.domain_name);
+        } catch (saasErr) {
+          console.warn("[SaaS] Failed to delete tenant on restaurant deletion:", saasErr);
+        }
+      }
+      if (existingRest?.domain_url && existingRest.domain_url !== existingRest.domain_name) {
+        try {
+          await deleteSaasTenant(existingRest.domain_url);
+        } catch (saasErr) {
+          console.warn("[SaaS] Failed to delete custom domain tenant on restaurant deletion:", saasErr);
+        }
       }
 
       await admin.from("restaurant_settings").delete().eq("restaurant_id", restaurantId);

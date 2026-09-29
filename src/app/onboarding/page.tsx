@@ -2,7 +2,8 @@
 
 "use client";
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, Lock, Globe, Store, Shield, MapPin, AlertCircle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, Lock, Globe, Store, Shield, MapPin, AlertCircle, CheckCircle2, XCircle, Loader2, Sparkles } from "lucide-react";
+import { checkDomainAvailability, type DomainCheckResult } from "@/src/app/actions/saas-domains";
 import { useRouter } from "next/navigation";
 import toast, { Toaster } from "react-hot-toast";
 
@@ -674,11 +675,70 @@ export default function OnboardingForm() {
   const [userRole, setUserRole] = useState<string>("customer");
   const [sessionAccessToken, setSessionAccessToken] = useState<string>("");
   const [domainUrl, setDomainUrl] = useState<string>("");
+  const [domainMode, setDomainMode] = useState<"subdomain" | "custom">("subdomain");
+  const [subdomainInput, setSubdomainInput] = useState<string>("");
+  const [customDomainInput, setCustomDomainInput] = useState<string>("");
+  const [domainCheckResult, setDomainCheckResult] = useState<DomainCheckResult | null>(null);
+  const [isCheckingDomain, setIsCheckingDomain] = useState<boolean>(false);
   const [posDomain, setPosDomain] = useState<string>("");
   const [customCuisineInput, setCustomCuisineInput] = useState<string>("");
   const [editAppId, setEditAppId] = useState<string | null>(null);
   const [editRestaurantId, setEditRestaurantId] = useState<string | null>(null);
   const [isLiveRestaurantEdit, setIsLiveRestaurantEdit] = useState<boolean>(false);
+
+  const isDomainManuallyEditedRef = useRef<boolean>(false);
+
+  // Keep subdomainInput in sync with restaurant name until user manually types a custom subdomain
+  useEffect(() => {
+    if (!isDomainManuallyEditedRef.current && formData.restaurant_name) {
+      const slug = formData.restaurant_name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+      setSubdomainInput(slug);
+    }
+  }, [formData.restaurant_name]);
+
+  // When reaching step 4, if not manually edited, ensure the complete slug is present
+  useEffect(() => {
+    if (currentStep === 4 && !isDomainManuallyEditedRef.current && formData.restaurant_name) {
+      const slug = formData.restaurant_name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+      if (slug && subdomainInput !== slug) {
+        setSubdomainInput(slug);
+      }
+    }
+  }, [currentStep, formData.restaurant_name, subdomainInput]);
+
+  // Debounced checkDomainAvailability
+  useEffect(() => {
+    const isCustom = domainMode === "custom";
+    const currentInput = isCustom ? customDomainInput : subdomainInput;
+
+    if (!currentInput || currentInput.trim().length < (isCustom ? 4 : 2)) {
+      setDomainCheckResult(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsCheckingDomain(true);
+      try {
+        const res = await checkDomainAvailability(currentInput, editRestaurantId || undefined, isCustom);
+        setDomainCheckResult(res);
+        if (res.ok && res.fullDomain) {
+          setDomainUrl(res.fullDomain);
+        }
+      } catch (err) {
+        console.warn("Domain check error:", err);
+      } finally {
+        setIsCheckingDomain(false);
+      }
+    }, 450);
+
+    return () => clearTimeout(timer);
+  }, [subdomainInput, customDomainInput, domainMode, editRestaurantId]);
+
+  const handleSelectSuggestion = (sugg: string) => {
+    isDomainManuallyEditedRef.current = true;
+    setSubdomainInput(sugg);
+    setDomainUrl(`${sugg}.marinate360.com`);
+  };
 
   const isUS = Boolean(
     formData.country?.trim().toLowerCase().includes("united states") ||
@@ -839,7 +899,17 @@ export default function OnboardingForm() {
               account_type: (rest.account_type || otherInfo.account_type || prev.account_type || "savings") as AccountType,
             }));
 
-            if (rest.domain_url) setDomainUrl(rest.domain_url);
+            if (rest.domain_url) {
+              isDomainManuallyEditedRef.current = true;
+              setDomainUrl(rest.domain_url);
+              if (rest.domain_url.includes(".marinate360.com")) {
+                setDomainMode("subdomain");
+                setSubdomainInput(rest.domain_url.replace(".marinate360.com", ""));
+              } else {
+                setDomainMode("custom");
+                setCustomDomainInput(rest.domain_url);
+              }
+            }
             if (rest.pos_domain) setPosDomain(rest.pos_domain);
             if (rest.package) setPackageName(rest.package);
 
@@ -1242,6 +1312,10 @@ export default function OnboardingForm() {
   const handleSubmit = async () => {
     if (!validateStep3()) {
       toast.error("Please complete all required fields");
+      return;
+    }
+    if (currentStep === 4 && domainCheckResult && !domainCheckResult.available) {
+      toast.error(`Domain "${domainCheckResult.fullDomain}" is already taken. Please pick an available domain.`);
       return;
     }
     const loadingToast = toast.loading("Submitting registration...");
@@ -3399,38 +3473,187 @@ export default function OnboardingForm() {
                         </p>
                       </div>
 
-                      {/* 2. Food Ordering App URL (SECOND) */}
-                      <div className="bg-gray-50/70 rounded-xl p-5 border border-gray-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <label className="block text-sm font-semibold text-gray-800">
-                            Food Ordering App URL <span className="text-red-500">*</span>
-                          </label>
-                          {userRole !== "super_admin" ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-zinc-600 bg-white border border-gray-200 px-2.5 py-0.5 rounded-md font-semibold">
-                              <Lock className="w-3 h-3 text-zinc-400" />
-                              Platform Managed (Read Only)
-                            </span>
+                      {/* 2. Food Ordering App URL (Hostinger Style Domain Checker) */}
+                      <div className="bg-white rounded-xl p-5 border border-gray-200 shadow-xs space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="block text-sm font-semibold text-gray-800">
+                              Food Ordering App URL (Subdomain) <span className="text-red-500">*</span>
+                            </label>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Search and claim your live web ordering domain.
+                               {/* Automatic DNS verification & edge routing will be deployed. */}
+                            </p>
+                          </div>
+                          <span className="inline-flex items-center gap-1 text-xs text-orange-700 bg-orange-50 border border-orange-200 px-2.5 py-1 rounded-md font-semibold">
+                            <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                            Live DNS Verification
+                          </span>
+                        </div>
+
+                        {/* Mode Selector Tabs */}
+                        <div className="flex items-center gap-2 p-1 bg-gray-100 rounded-lg w-fit border border-gray-200">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDomainMode("subdomain");
+                              if (subdomainInput) {
+                                setDomainUrl(`${subdomainInput}.marinate360.com`);
+                              }
+                            }}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                              domainMode === "subdomain"
+                                ? "bg-white text-gray-900 shadow-xs"
+                                : "text-gray-600 hover:text-gray-900"
+                            }`}
+                          >
+                            Standard Subdomain (.marinate360.com)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDomainMode("custom");
+                              if (customDomainInput) {
+                                setDomainUrl(customDomainInput);
+                              }
+                            }}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                              domainMode === "custom"
+                                ? "bg-white text-gray-900 shadow-xs"
+                                : "text-gray-600 hover:text-gray-900"
+                            }`}
+                          >
+                            Custom Domain (e.g. wildlife.com)
+                          </button>
+                        </div>
+
+                        {/* Search Input Group */}
+                        <div>
+                          {domainMode === "subdomain" ? (
+                            <div className="flex rounded-xl shadow-xs border border-gray-300 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 overflow-hidden bg-white transition-all">
+                              <span className="inline-flex items-center px-3.5 bg-gray-50 border-r border-gray-200 text-xs font-semibold text-gray-500 select-none">
+                                https://
+                              </span>
+                              <input
+                                type="text"
+                                value={subdomainInput}
+                                onChange={(e) => {
+                                  isDomainManuallyEditedRef.current = true;
+                                  const val = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+                                  setSubdomainInput(val);
+                                }}
+                                placeholder="your-restaurant-name"
+                                className="flex-1 px-3.5 py-3 text-sm font-semibold text-gray-900 placeholder-gray-400 focus:outline-none"
+                              />
+                              <span className="inline-flex items-center px-3.5 bg-gray-50 border-l border-gray-200 text-xs font-semibold text-gray-600 select-none">
+                                .marinate360.com
+                              </span>
+                              <div className="flex items-center pr-3 bg-white pl-2">
+                                {isCheckingDomain ? (
+                                  <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+                                ) : domainCheckResult?.available ? (
+                                  <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                                ) : domainCheckResult && !domainCheckResult.available ? (
+                                  <XCircle className="w-5 h-5 text-rose-500" />
+                                ) : null}
+                              </div>
+                            </div>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-xs text-orange-600 bg-orange-50 border border-orange-200 px-2.5 py-0.5 rounded-md font-semibold">
-                              Configurable Endpoint
-                            </span>
+                            <div className="space-y-1.5">
+                              <div className="flex rounded-xl shadow-xs border border-gray-300 focus-within:border-orange-500 focus-within:ring-2 focus-within:ring-orange-500/20 overflow-hidden bg-white transition-all">
+                                <span className="inline-flex items-center px-3.5 bg-gray-50 border-r border-gray-200 text-xs font-semibold text-gray-500 select-none">
+                                  https://
+                                </span>
+                                <input
+                                  type="text"
+                                  value={customDomainInput}
+                                  onChange={(e) => {
+                                    const val = e.target.value.toLowerCase().trim().replace(/[^a-z0-9.-]/g, "");
+                                    setCustomDomainInput(val);
+                                  }}
+                                  placeholder="e.g. wildlife.com or order.restaurant.com"
+                                  className="flex-1 px-3.5 py-3 text-sm font-semibold text-gray-900 placeholder-gray-400 focus:outline-none"
+                                />
+                                <div className="flex items-center pr-3 bg-white pl-2">
+                                  {isCheckingDomain ? (
+                                    <Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
+                                  ) : domainCheckResult?.available ? (
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                                  ) : domainCheckResult && !domainCheckResult.available ? (
+                                    <XCircle className="w-5 h-5 text-rose-500" />
+                                  ) : null}
+                                </div>
+                              </div>
+                              <p className="text-xs text-gray-500">
+                                Configure your custom brand domain. To point your live traffic, add a CNAME record pointing to <span className="font-mono text-gray-700 font-semibold">origin-1.marinate360.com</span>.
+                              </p>
+                            </div>
                           )}
                         </div>
-                        <input
-                          type="text"
-                          disabled={userRole !== "super_admin"}
-                          value={domainUrl !== "" ? domainUrl : defaultDomainUrl}
-                          onChange={(e) => setDomainUrl(e.target.value)}
-                          placeholder="e.g. restaurant.marinate360.com"
-                          className={`w-full px-4 py-3 border rounded-lg text-sm ${
-                            userRole !== "super_admin"
-                              ? "bg-gray-100 text-gray-600 border-gray-300 cursor-not-allowed font-medium select-none"
-                              : "bg-white text-gray-900 border-gray-300 focus:ring-2 focus:ring-orange-500 focus:border-transparent font-medium"
-                          }`}
-                        />
-                        <p className="text-xs text-gray-500 mt-1.5">
-                          Public-facing web ordering URL and digital menu for customers.
-                        </p>
+
+                        {/* Status Feedback Banner (Hostinger / GoDaddy style) */}
+                        {isCheckingDomain && (
+                          <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-50 border border-orange-200/80 rounded-xl px-4 py-2.5 animate-pulse">
+                            <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+                            <span>Checking domain availability across database & edge DNS servers...</span>
+                          </div>
+                        )}
+
+                        {!isCheckingDomain && domainCheckResult?.available && (
+                          <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-900 animate-in fade-in duration-150">
+                            <div className="flex items-start gap-3">
+                              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                              <div>
+                                <h4 className="text-sm font-bold text-emerald-900">
+                                  {domainCheckResult.fullDomain} is available!
+                                </h4>
+                                <p className="text-xs text-emerald-700 mt-0.5">
+                                  Domain is verified and ready for instant automatic routing upon creation.
+                                </p>
+                              </div>
+                            </div>
+                            <span className="inline-flex items-center text-xs font-bold text-white bg-emerald-600 px-3 py-1 rounded-lg shadow-xs shrink-0">
+                              Available
+                            </span>
+                          </div>
+                        )}
+
+                        {!isCheckingDomain && domainCheckResult && !domainCheckResult.available && (
+                          <div className="bg-rose-50/80 border border-rose-200 rounded-xl p-4 text-rose-900 space-y-3 animate-in fade-in duration-150">
+                            <div className="flex items-start gap-3">
+                              <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                              <div>
+                                <h4 className="text-sm font-bold text-rose-900">
+                                  {domainCheckResult.fullDomain} is not available
+                                </h4>
+                                <p className="text-xs text-rose-700 mt-0.5">
+                                  {domainCheckResult.reason || "This domain is already registered to another restaurant or reserved."}
+                                </p>
+                              </div>
+                            </div>
+
+                            {domainCheckResult.suggestions && domainCheckResult.suggestions.length > 0 && (
+                              <div className="pt-2 border-t border-rose-200/70">
+                                <p className="text-xs font-semibold text-rose-800 mb-2">
+                                  Available alternatives:
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {domainCheckResult.suggestions.map((sugg) => (
+                                    <button
+                                      key={sugg}
+                                      type="button"
+                                      onClick={() => handleSelectSuggestion(sugg)}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-orange-50 border border-rose-200 hover:border-orange-300 text-xs font-semibold text-gray-800 rounded-lg transition-colors shadow-2xs group"
+                                    >
+                                      <span>{sugg}.marinate360.com</span>
+                                      <span className="text-orange-600 font-bold group-hover:translate-x-0.5 transition-transform">+ Claim</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

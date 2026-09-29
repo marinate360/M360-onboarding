@@ -933,9 +933,14 @@ function formatDateTime(value?: string | null) {
   });
 }
 
-function defaultSettingValue(type: RestaurantSettingDefinition["type"]) {
+function defaultSettingValue(definition: RestaurantSettingDefinition | RestaurantSettingDefinition["type"]) {
+  if (typeof definition === "object" && definition.defaultValue !== undefined) {
+    return definition.defaultValue;
+  }
+  const type = typeof definition === "string" ? definition : definition.type;
   if (type === "boolean") return "true";
   if (type === "number") return "0";
+  if (type === "json") return "{}";
   return "";
 }
 
@@ -1114,7 +1119,7 @@ function StaffRestaurantWorkspace({
               <div className="grid gap-3 md:grid-cols-2">
                 {RESTAURANT_SETTING_DEFINITIONS.map((definition) => {
                   const currentSetting = settingsMap.get(definition.key);
-                  const displayValue = currentSetting?.setting_value ?? defaultSettingValue(definition.type);
+                  const displayValue = currentSetting?.setting_value ?? defaultSettingValue(definition);
                   return (
                     <div
                       key={`${restaurant.id}-${definition.key}-${currentSetting?.setting_value ?? "missing"}`}
@@ -1154,6 +1159,15 @@ function StaffRestaurantWorkspace({
                             <option value="true">true</option>
                             <option value="false">false</option>
                           </select>
+                        ) : definition.type === "json" ? (
+                          <textarea
+                            aria-label={definition.label}
+                            disabled
+                            rows={3}
+                            value={displayValue}
+                            placeholder="Not configured"
+                            className="w-full cursor-not-allowed rounded-md border border-zinc-200 bg-zinc-100/80 px-3 py-2 text-xs font-mono text-zinc-700 opacity-90 outline-none"
+                          />
                         ) : (
                           <input
                             aria-label={definition.label}
