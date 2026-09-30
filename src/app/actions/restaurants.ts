@@ -22,7 +22,16 @@ import { writeAuditLog, loggedAction } from "./app-logs";
 import { formatAddress, buildStructuredAddress, parseStructuredAddress } from "@/src/lib/utils/address";
 import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { getServicesForPackage } from "@/src/lib/constants/restaurant-options";
-import { createSaasTenant, deleteSaasTenant } from "./saas-domains";
+import {
+  createSaasTenant,
+  deleteSaasTenant,
+  checkDomainAvailability,
+} from "./saas-domains";
+import {
+  extractTenantKey,
+  cleanSubdomainInput,
+  cleanCustomDomainInput,
+} from "@/src/lib/utils/domain";
 import { sendRestaurantWelcomeEmail } from "@/src/lib/email/service";
 
 export type RestaurantRecord = {
@@ -606,11 +615,12 @@ export async function getRestaurantDetails(
       if (Object.keys(otherInfo).length === 0) {
         const { data: appData } = await admin
           .from("onboarding_applications")
-          .select("legal, bank, address")
+          .select("legal, bank, address, documents, images")
           .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${data.domain_name}`)
           .maybeSingle();
 
         if (appData) {
+          const appDocs = (appData.documents as Record<string, any>) || {};
           otherInfo = {
             pan_number: (appData.legal as any)?.pan_number || "",
             fullnameaspan: (appData.legal as any)?.fullnameaspan || "",
@@ -619,8 +629,32 @@ export async function getRestaurantDetails(
             bank_accno: (appData.bank as any)?.bank_accno || "",
             ifsc_code: (appData.bank as any)?.ifsc_code || "",
             account_type: (appData.bank as any)?.account_type || "savings",
+            pan_card_url: appDocs.pan_card?.public_url || "",
+            gst_certificate_url: appDocs.gst_certificate?.public_url || "",
+            fssai_license_url: appDocs.fssai_license?.public_url || "",
           };
         }
+      }
+
+      let panCardUrl = panCardAsset?.public_url || otherInfo.pan_card_url || null;
+      let gstCertUrl = gstAsset?.public_url || otherInfo.gst_certificate_url || null;
+      let fssaiUrl = fssaiAsset?.public_url || otherInfo.fssai_license_url || null;
+
+      if (!panCardUrl || !gstCertUrl || !fssaiUrl) {
+        try {
+          const { data: appData } = await admin
+            .from("onboarding_applications")
+            .select("documents, images")
+            .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${data.domain_name}`)
+            .maybeSingle();
+
+          if (appData) {
+            const appDocs = (appData.documents as Record<string, any>) || {};
+            if (!panCardUrl && appDocs.pan_card?.public_url) panCardUrl = appDocs.pan_card.public_url;
+            if (!gstCertUrl && appDocs.gst_certificate?.public_url) gstCertUrl = appDocs.gst_certificate.public_url;
+            if (!fssaiUrl && appDocs.fssai_license?.public_url) fssaiUrl = appDocs.fssai_license.public_url;
+          }
+        } catch (e) {}
       }
 
       let ownerName: string | null = otherInfo.fullname || otherInfo.owner_name || null;
@@ -669,9 +703,9 @@ export async function getRestaurantDetails(
         bank_accno: otherInfo.bank_accno || null,
         ifsc_code: otherInfo.ifsc_code || null,
         account_type: otherInfo.account_type || null,
-        pan_card_url: panCardAsset?.public_url || otherInfo.pan_card_url || null,
-        gst_certificate_url: gstAsset?.public_url || otherInfo.gst_certificate_url || null,
-        fssai_license_url: fssaiAsset?.public_url || otherInfo.fssai_license_url || null,
+        pan_card_url: panCardUrl,
+        gst_certificate_url: gstCertUrl,
+        fssai_license_url: fssaiUrl,
         images,
       };
 
@@ -715,9 +749,9 @@ export async function createRestaurantWithFormData(
       const fileMappings: Array<[string, string]> = [
         ["logo_url", "logo"],
         ["background_image_url", "background"],
-        ["pan_card", "certificates"],
-        ["gst_certificate", "certificates"],
-        ["fssai_license", "certificates"],
+        ["pan_card", "pan_card"],
+        ["gst_certificate", "gst_certificate"],
+        ["fssai_license", "fssai_license"],
       ];
 
       let logoUrl: string | null = null;
@@ -1047,14 +1081,25 @@ export async function updateRestaurantWithFormData(
         }
       }
 
-      // Handle new file uploads
+      // Handle new file uploads & clean up previous files in storage
+      const existingImages = await listRestaurantImages(restaurantId);
+
+      // Check linked onboarding_application if any storage_paths are referenced there
+      const { data: linkedApp } = await admin
+        .from("onboarding_applications")
+        .select("id, documents, images")
+        .or(`restaurant_id.eq.${restaurantId},domain_name.eq.${existing.domain_name}`)
+        .maybeSingle();
+      const appDocs = (linkedApp?.documents as Record<string, any>) || {};
+      const appImgs = (linkedApp?.images as Record<string, any>) || {};
+
       const uploadedAssets: StoredAsset[] = [];
       const fileMappings: Array<[string, string]> = [
         ["logo_url", "logo"],
         ["background_image_url", "background"],
-        ["pan_card", "certificates"],
-        ["gst_certificate", "certificates"],
-        ["fssai_license", "certificates"],
+        ["pan_card", "pan_card"],
+        ["gst_certificate", "gst_certificate"],
+        ["fssai_license", "fssai_license"],
       ];
 
       let newLogoUrl = existing.logo_url;
@@ -1063,23 +1108,72 @@ export async function updateRestaurantWithFormData(
       for (const [fieldKey, imageType] of fileMappings) {
         const file = formData.get(fieldKey);
         if (file instanceof File && file.size > 0) {
-          // If replacing logo, delete old logo from storage
-          if (fieldKey === "logo_url" && existing.logo_url) {
-            await deleteRestaurantAsset(existing.logo_url);
+          // Identify any old asset path to remove from storage
+          let oldAssetPath: string | null = null;
+          if (fieldKey === "logo_url") {
+            const oldImg = existingImages.find((img) => img.image_type === "logo" || img.storage_path.includes("/logo/"));
+            oldAssetPath = oldImg?.storage_path || existing.logo_url || appImgs.logo_url?.storage_path || null;
+          } else if (fieldKey === "background_image_url") {
+            const oldImg = existingImages.find((img) => img.image_type === "background" || img.storage_path.includes("/background/"));
+            oldAssetPath = oldImg?.storage_path || existing.background_image_url || appImgs.background_image_url?.storage_path || null;
+          } else if (fieldKey === "pan_card") {
+            const oldImg = existingImages.find(
+              (img) =>
+                img.image_type === "pan_card" ||
+                img.image_type === "pan" ||
+                (img.image_type === "certificates" && img.original_name.toLowerCase().includes("pan")) ||
+                img.storage_path.toLowerCase().includes("pan")
+            );
+            oldAssetPath = oldImg?.storage_path || appDocs.pan_card?.storage_path || null;
+          } else if (fieldKey === "gst_certificate") {
+            const oldImg = existingImages.find(
+              (img) =>
+                img.image_type === "gst_certificate" ||
+                img.image_type === "gst" ||
+                (img.image_type === "certificates" && img.original_name.toLowerCase().includes("gst")) ||
+                img.storage_path.toLowerCase().includes("gst")
+            );
+            oldAssetPath = oldImg?.storage_path || appDocs.gst_certificate?.storage_path || null;
+          } else if (fieldKey === "fssai_license") {
+            const oldImg = existingImages.find(
+              (img) =>
+                img.image_type === "fssai_license" ||
+                img.image_type === "fssai" ||
+                (img.image_type === "certificates" && img.original_name.toLowerCase().includes("fssai")) ||
+                img.storage_path.toLowerCase().includes("fssai")
+            );
+            oldAssetPath = oldImg?.storage_path || appDocs.fssai_license?.storage_path || null;
           }
-          if (fieldKey === "background_image_url" && existing.background_image_url) {
-            await deleteRestaurantAsset(existing.background_image_url);
+
+          if (oldAssetPath) {
+            await deleteRestaurantAsset(oldAssetPath);
           }
 
           const asset = await uploadRestaurantAsset(domainName, imageType, file);
           uploadedAssets.push(asset);
           if (fieldKey === "logo_url") newLogoUrl = asset.public_url;
           if (fieldKey === "background_image_url") newBackgroundUrl = asset.public_url;
+
+          // Also synchronize into linked onboarding_applications if present
+          if (linkedApp?.id) {
+            if (["logo_url", "background_image_url"].includes(fieldKey)) {
+              appImgs[fieldKey] = asset;
+            } else {
+              appDocs[fieldKey] = asset;
+            }
+          }
         }
       }
 
       if (uploadedAssets.length > 0) {
         await insertRestaurantImageRecords(restaurantId, uploadedAssets);
+      }
+
+      if (linkedApp?.id && uploadedAssets.length > 0) {
+        await admin
+          .from("onboarding_applications")
+          .update({ images: appImgs, documents: appDocs, updated_at: new Date().toISOString() })
+          .eq("id", linkedApp.id);
       }
 
       const assignedServices = payload.services && payload.services.length > 0
@@ -1089,6 +1183,25 @@ export async function updateRestaurantWithFormData(
       const isSuperAdmin = actor.role === "super_admin";
       const domainUrlToSave = isSuperAdmin && payload.domain_url ? payload.domain_url.trim() : existing.domain_url;
       const posDomainToSave = isSuperAdmin && payload.pos_domain ? payload.pos_domain.trim() : existing.pos_domain;
+
+      // Handle SaaS API domain update: delete old tenant and insert new tenant if domain changed
+      const oldTenantKey = extractTenantKey(existing.domain_url || existing.domain_name);
+      const newTenantKey = extractTenantKey(domainUrlToSave || existing.domain_url || existing.domain_name);
+
+      if (isSuperAdmin && payload.domain_url && newTenantKey && oldTenantKey !== newTenantKey) {
+        if (oldTenantKey) {
+          try {
+            await deleteSaasTenant(oldTenantKey);
+          } catch (delErr) {
+            console.warn(`[SaaS] Failed deleting old domain "${oldTenantKey}":`, delErr);
+          }
+        }
+        try {
+          await createSaasTenant(newTenantKey);
+        } catch (createErr) {
+          console.warn(`[SaaS] Failed creating new domain "${newTenantKey}":`, createErr);
+        }
+      }
 
       const otherInfoToSave = {
         ...((existing.other_info as any) || {}),
@@ -1106,6 +1219,7 @@ export async function updateRestaurantWithFormData(
 
       const updateData: Record<string, any> = {
         restaurant_name: payload.restaurant_name.trim(),
+        domain_name: newTenantKey || existing.domain_name,
         domain_url: domainUrlToSave,
         email: payload.email ? payload.email.trim() : null,
         contact: numericContact(payload.contact),
@@ -1122,7 +1236,7 @@ export async function updateRestaurantWithFormData(
         gst_number: payload.gst_number || null,
         fssai_number: payload.fssai_number || null,
         other_info: otherInfoToSave,
-        pos_domain: payload.pos_domain || existing.pos_domain,
+        pos_domain: posDomainToSave,
         time_zone: payload.time_zone || existing.time_zone || "Asia/Kolkata",
         theme: payload.theme || existing.theme || "light",
         logo_url: newLogoUrl,
@@ -1212,6 +1326,144 @@ export async function updateRestaurantRecord(
   fd.append("restaurantId", restaurantId);
   fd.append("payload", JSON.stringify(values));
   return updateRestaurantWithFormData(fd);
+}
+
+/**
+ * Direct domain router manager for restaurant workspace.
+ * Deletes old domain and inserts new domain in SaaS API, updating Supabase records.
+ */
+export async function updateRestaurantDomains(
+  accessToken: string,
+  restaurantId: string,
+  input: {
+    domain_url: string;
+    pos_domain: string;
+    isCustomDomain?: boolean;
+  }
+): Promise<ActionResult<RestaurantRecord>> {
+  return loggedAction(
+    { actionName: "updateRestaurantDomains", httpMethod: "PUT", httpPath: `/restaurants/${restaurantId}/domains` },
+    async (ctx) => {
+      const actor = await getUserFromAccessToken(accessToken);
+      ctx.actorId = actor.id;
+      ctx.restaurantId = restaurantId;
+
+      if (!isStaffOrSuperAdminRole(actor.role)) {
+        throw new Error("Only administrators have permission to manage restaurant domain routing.");
+      }
+
+      const admin = getSupabaseAdmin();
+
+      const { data: existing, error: findError } = await admin
+        .from("restaurants")
+        .select("*")
+        .eq("id", restaurantId)
+        .single();
+
+      if (findError || !existing) {
+        throw new Error("Restaurant not found.");
+      }
+
+      const rawDomain = (input.domain_url || "").trim();
+      if (!rawDomain) {
+        throw new Error("Food Ordering App domain cannot be empty.");
+      }
+
+      const isCustom = Boolean(input.isCustomDomain || (rawDomain.includes(".") && !rawDomain.endsWith(".marinate360.com")));
+      const newTenantKey = extractTenantKey(rawDomain);
+      if (!newTenantKey) {
+        throw new Error("Invalid domain name specified.");
+      }
+
+      const formattedDomainUrl = isCustom
+        ? cleanCustomDomainInput(rawDomain)
+        : `${cleanSubdomainInput(rawDomain)}.marinate360.com`;
+
+      // Check collision/availability (excluding this restaurant's own current records)
+      const avail = await checkDomainAvailability(formattedDomainUrl, restaurantId, isCustom);
+      if (!avail.available && !avail.isCurrentDomain) {
+        throw new Error(avail.reason || "This domain is not available.");
+      }
+
+      const oldTenantKey = extractTenantKey(existing.domain_url || existing.domain_name);
+
+      // If domain key changed, SaaS API requires delete old + insert new
+      if (oldTenantKey && newTenantKey && oldTenantKey !== newTenantKey) {
+        try {
+          await deleteSaasTenant(oldTenantKey);
+        } catch (delErr) {
+          console.warn(`[SaaS] Failed deleting old domain "${oldTenantKey}":`, delErr);
+        }
+
+        try {
+          await createSaasTenant(newTenantKey);
+        } catch (createErr) {
+          console.warn(`[SaaS] Failed creating new domain "${newTenantKey}":`, createErr);
+        }
+      } else if (!oldTenantKey && newTenantKey) {
+        try {
+          await createSaasTenant(newTenantKey);
+        } catch (createErr) {
+          console.warn(`[SaaS] Failed registering domain "${newTenantKey}":`, createErr);
+        }
+      }
+
+      // POS domain update: staff can keep existing, super admin can change
+      const isSuperAdmin = actor.role === "super_admin";
+      const posDomainToSave = (isSuperAdmin && input.pos_domain ? input.pos_domain.trim() : null) || existing.pos_domain || "pos.marinate360.com";
+
+      const updateData = {
+        domain_name: newTenantKey,
+        domain_url: formattedDomainUrl,
+        pos_domain: posDomainToSave,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: updated, error: updateError } = await admin
+        .from("restaurants")
+        .update(updateData)
+        .eq("id", restaurantId)
+        .select("*")
+        .single();
+
+      if (updateError || !updated) {
+        throw new Error(updateError?.message || "Failed to update restaurant domains.");
+      }
+
+      // Fetch images for complete record
+      const { data: images } = await admin
+        .from("restaurant_images")
+        .select("*")
+        .eq("restaurant_id", restaurantId);
+
+      void writeAuditLog({
+        source: "updateRestaurantDomains",
+        eventType: "restaurant.domain_updated",
+        actorId: actor.id,
+        restaurantId,
+        entityType: "restaurant",
+        entityId: restaurantId,
+        message: `Updated domains for ${existing.restaurant_name}: Web App = ${formattedDomainUrl}, POS = ${posDomainToSave}`,
+        metadata: {
+          old_domain_url: existing.domain_url,
+          new_domain_url: formattedDomainUrl,
+          old_key: oldTenantKey,
+          new_key: newTenantKey,
+          pos_domain: posDomainToSave,
+        },
+      });
+
+      return {
+        ok: true,
+        data: {
+          ...updated,
+          address: typeof updated.address === "string" ? updated.address : JSON.stringify(updated.address),
+          raw_address: updated.address,
+          images: images || [],
+        } as RestaurantRecord,
+      };
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------

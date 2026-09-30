@@ -780,6 +780,39 @@ export default function OnboardingForm() {
           }
 
           if (restData) {
+            // Ensure stored images and documents are always retrieved
+            if (!restData.images || !Array.isArray(restData.images) || restData.images.length === 0) {
+              const { data: imgRows } = await supabase
+                .from("restaurant_images")
+                .select("storage_path, original_name, image_type")
+                .eq("restaurant_id", editRestId);
+
+              if (imgRows && imgRows.length > 0) {
+                restData.images = imgRows.map((item) => {
+                  const { data: urlData } = supabase.storage.from("images").getPublicUrl(item.storage_path);
+                  return { ...item, public_url: urlData.publicUrl };
+                });
+              }
+            }
+
+            // Also check linked onboarding_applications to recover documents if any were uploaded during registration
+            if (!restData.pan_card_url || !restData.fssai_license_url || !restData.gst_certificate_url) {
+              const { data: appData } = await supabase
+                .from("onboarding_applications")
+                .select("documents, images")
+                .or(`restaurant_id.eq.${editRestId},domain_name.eq.${restData.domain_name}`)
+                .maybeSingle();
+
+              if (appData) {
+                const appDocs = (appData.documents as Record<string, any>) || {};
+                const appImgs = (appData.images as Record<string, any>) || {};
+                if (!restData.pan_card_url && appDocs.pan_card?.public_url) restData.pan_card_url = appDocs.pan_card.public_url;
+                if (!restData.fssai_license_url && appDocs.fssai_license?.public_url) restData.fssai_license_url = appDocs.fssai_license.public_url;
+                if (!restData.gst_certificate_url && appDocs.gst_certificate?.public_url) restData.gst_certificate_url = appDocs.gst_certificate.public_url;
+                if (!restData.logo_url && appImgs.logo_url?.public_url) restData.logo_url = appImgs.logo_url.public_url;
+                if (!restData.background_image_url && appImgs.background_image_url?.public_url) restData.background_image_url = appImgs.background_image_url.public_url;
+              }
+            }
             if (!restData.fullname && !restData.owner_name) {
               const oInfo = restData.other_info && typeof restData.other_info === "object" ? restData.other_info : {};
               if (oInfo.fullname || oInfo.owner_name) {
@@ -913,13 +946,38 @@ export default function OnboardingForm() {
             if (rest.pos_domain) setPosDomain(rest.pos_domain);
             if (rest.package) setPackageName(rest.package);
 
+            const docsList = Array.isArray(rest.images) ? rest.images : [];
+            const panFromImages = docsList.find(
+              (img: any) =>
+                img.image_type === "pan_card" ||
+                img.image_type === "pan" ||
+                (img.image_type === "certificates" && img.original_name?.toLowerCase().includes("pan")) ||
+                img.storage_path?.toLowerCase().includes("pan")
+            )?.public_url;
+
+            const gstFromImages = docsList.find(
+              (img: any) =>
+                img.image_type === "gst_certificate" ||
+                img.image_type === "gst" ||
+                (img.image_type === "certificates" && img.original_name?.toLowerCase().includes("gst")) ||
+                img.storage_path?.toLowerCase().includes("gst")
+            )?.public_url;
+
+            const fssaiFromImages = docsList.find(
+              (img: any) =>
+                img.image_type === "fssai_license" ||
+                img.image_type === "fssai" ||
+                (img.image_type === "certificates" && img.original_name?.toLowerCase().includes("fssai")) ||
+                img.storage_path?.toLowerCase().includes("fssai")
+            )?.public_url;
+
             setPreviewImages((prev) => ({
               ...prev,
-              ...(rest.logo_url ? { logo_url: rest.logo_url } : {}),
-              ...(rest.background_image_url ? { background_image_url: rest.background_image_url } : {}),
-              ...(rest.pan_card_url || otherInfo.pan_card_url ? { pan_card: rest.pan_card_url || otherInfo.pan_card_url } : {}),
-              ...(rest.gst_certificate_url || otherInfo.gst_certificate_url ? { gst_certificate: rest.gst_certificate_url || otherInfo.gst_certificate_url } : {}),
-              ...(rest.fssai_license_url || otherInfo.fssai_license_url ? { fssai_license: rest.fssai_license_url || otherInfo.fssai_license_url } : {}),
+              logo_url: rest.logo_url || prev.logo_url,
+              background_image_url: rest.background_image_url || prev.background_image_url,
+              pan_card: rest.pan_card_url || panFromImages || otherInfo.pan_card_url || prev.pan_card,
+              gst_certificate: rest.gst_certificate_url || gstFromImages || otherInfo.gst_certificate_url || prev.gst_certificate,
+              fssai_license: rest.fssai_license_url || fssaiFromImages || otherInfo.fssai_license_url || prev.fssai_license,
             }));
           }
         } catch (err) {
@@ -982,13 +1040,15 @@ export default function OnboardingForm() {
               if (app.package) {
                 setPackageName(app.package);
               }
+              const appDocs = (app.documents as Record<string, any>) || {};
+              const appImgs = (app.images as Record<string, any>) || {};
               setPreviewImages((prev) => ({
                 ...prev,
-                ...((app as any).logo_url ? { logo_url: (app as any).logo_url } : {}),
-                ...((app as any).background_image_url ? { background_image_url: (app as any).background_image_url } : {}),
-                ...((app.legal as any)?.pan_card_url ? { pan_card: (app.legal as any).pan_card_url } : {}),
-                ...((app.legal as any)?.gst_certificate_url ? { gst_certificate: (app.legal as any).gst_certificate_url } : {}),
-                ...((app.legal as any)?.fssai_license_url ? { fssai_license: (app.legal as any).fssai_license_url } : {}),
+                logo_url: appImgs.logo_url?.public_url || (app as any).logo_url || prev.logo_url,
+                background_image_url: appImgs.background_image_url?.public_url || (app as any).background_image_url || prev.background_image_url,
+                pan_card: appDocs.pan_card?.public_url || (app.legal as any)?.pan_card_url || prev.pan_card,
+                gst_certificate: appDocs.gst_certificate?.public_url || (app.legal as any)?.gst_certificate_url || prev.gst_certificate,
+                fssai_license: appDocs.fssai_license?.public_url || (app.legal as any)?.fssai_license_url || prev.fssai_license,
               }));
             }
           }
@@ -1635,7 +1695,7 @@ export default function OnboardingForm() {
   };
 
   const isStaffOrAdmin = userRole === "super_admin" || userRole === "staff";
-  const totalSteps = isStaffOrAdmin ? 4 : 3;
+  const totalSteps = isStaffOrAdmin && !editRestaurantId ? 4 : 3;
   const progressPercent = (currentStep / totalSteps) * 100;
   const cleanSlug = formData.restaurant_name
     ? formData.restaurant_name.toLowerCase().replace(/[^a-z0-9]/g, "").trim()
@@ -1764,8 +1824,8 @@ export default function OnboardingForm() {
                   </div>
                 </div>
 
-                {/* Step 4 for Staff & Super Admin */}
-                {isStaffOrAdmin && (
+                {/* Step 4 for Staff & Super Admin (Creation Only) */}
+                {isStaffOrAdmin && !editRestaurantId && (
                   <div
                     className={`flex items-start gap-4 p-4 rounded-xl transition ${
                       currentStep === 4 ? "bg-orange-50 border-l-4 border-orange-500" : "bg-gray-50"
@@ -2098,34 +2158,31 @@ export default function OnboardingForm() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div>
                         <label className="block text-sm font-semibold text-gray-700 mb-3">
-                          Restaurant Logo *
+                          Restaurant Logo <span className="text-red-500">*</span>
                         </label>
-                        {isLiveRestaurantEdit && (
-                        <div className="flex items-center gap-2 p-2.5 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-medium">
-                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Logo is locked for active restaurants.</span>
-                        </div>
-                      )}
-                      <div className={`border-2 border-dashed rounded-xl p-8 text-center transition ${
-                        isLiveRestaurantEdit
-                          ? "border-gray-200 bg-gray-50 cursor-not-allowed"
-                          : "border-gray-300 hover:border-orange-500 cursor-pointer"
-                      }`}>
-                        <input
-                          type="file"
-                          disabled={isLiveRestaurantEdit}
-                          onChange={(e) => handleFileUpload("logo_url", e)}
-                          accept="image/jpeg,image/jpg,image/png"
-                          className="hidden"
-                          id="logo-upload"
-                        />
-                        <label htmlFor={isLiveRestaurantEdit ? undefined : "logo-upload"} className={isLiveRestaurantEdit ? "cursor-not-allowed" : "cursor-pointer"}>
+                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-orange-500 transition cursor-pointer relative bg-white">
+                          <input
+                            type="file"
+                            onChange={(e) => handleFileUpload("logo_url", e)}
+                            accept="image/jpeg,image/jpg,image/png"
+                            className="hidden"
+                            id="logo-upload"
+                          />
+                          <label htmlFor="logo-upload" className="cursor-pointer block">
                             {previewImages.logo_url ? (
-                              <img
-                                src={previewImages.logo_url as string}
-                                alt="Logo preview"
-                                className="w-full h-40 object-contain rounded-lg mb-3"
-                              />
+                              <div className="flex flex-col items-center">
+                                <img
+                                  src={previewImages.logo_url as string}
+                                  alt="Logo preview"
+                                  className="w-full max-w-[220px] h-32 object-contain rounded-lg mb-3 border border-gray-100 p-1"
+                                />
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 border border-orange-200 text-xs font-semibold text-orange-700 hover:bg-orange-100 transition">
+                                  <span>Change / Replace Logo</span>
+                                </div>
+                                {formData.logo_url && (
+                                  <p className="text-xs text-emerald-600 font-semibold mt-2">✓ New logo selected: {formData.logo_url.name}</p>
+                                )}
+                              </div>
                             ) : (
                               <div className="flex flex-col items-center gap-3">
                                 <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center">
@@ -2155,32 +2212,29 @@ export default function OnboardingForm() {
                         <label className="block text-sm font-semibold text-gray-700 mb-3">
                           Cover Image (Optional)
                         </label>
-                        {isLiveRestaurantEdit && (
-                        <div className="flex items-center gap-2 p-2.5 mb-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-medium">
-                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Cover image is locked for active restaurants.</span>
-                        </div>
-                      )}
-                      <div className={`border-2 border-dashed rounded-xl p-8 text-center transition ${
-                        isLiveRestaurantEdit
-                          ? "border-gray-200 bg-gray-50 cursor-not-allowed"
-                          : "border-gray-300 hover:border-orange-500 cursor-pointer"
-                      }`}>
-                        <input
-                          type="file"
-                          disabled={isLiveRestaurantEdit}
-                          onChange={(e) => handleFileUpload("background_image_url", e)}
-                          accept="image/jpeg,image/jpg,image/png"
-                          className="hidden"
-                          id="bg-upload"
-                        />
-                        <label htmlFor={isLiveRestaurantEdit ? undefined : "bg-upload"} className={isLiveRestaurantEdit ? "cursor-not-allowed" : "cursor-pointer"}>
+                        <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center hover:border-orange-500 transition cursor-pointer relative bg-white">
+                          <input
+                            type="file"
+                            onChange={(e) => handleFileUpload("background_image_url", e)}
+                            accept="image/jpeg,image/jpg,image/png"
+                            className="hidden"
+                            id="bg-upload"
+                          />
+                          <label htmlFor="bg-upload" className="cursor-pointer block">
                             {previewImages.background_image_url ? (
-                              <img
-                                src={previewImages.background_image_url as string}
-                                alt="Cover preview"
-                                className="w-full h-40 object-cover rounded-lg mb-3"
-                              />
+                              <div className="flex flex-col items-center">
+                                <img
+                                  src={previewImages.background_image_url as string}
+                                  alt="Cover preview"
+                                  className="w-full max-w-[320px] h-32 object-cover rounded-lg mb-3 border border-gray-100"
+                                />
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 border border-orange-200 text-xs font-semibold text-orange-700 hover:bg-orange-100 transition">
+                                  <span>Change / Replace Cover</span>
+                                </div>
+                                {formData.background_image_url && (
+                                  <p className="text-xs text-emerald-600 font-semibold mt-2">✓ New cover selected: {formData.background_image_url.name}</p>
+                                )}
+                              </div>
                             ) : (
                               <div className="flex flex-col items-center gap-3">
                                 <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center">
@@ -2941,42 +2995,72 @@ export default function OnboardingForm() {
                           <label className="block text-sm font-semibold text-gray-700">
                             {isUS ? "Tax Document / EIN Letter" : "PAN Card Document"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
-                          {isLiveRestaurantEdit && previewImages.pan_card && (
+                          {previewImages.pan_card && (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                              <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                              Verified & Locked
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              Uploaded
                             </span>
                           )}
                         </div>
-                        {isLiveRestaurantEdit && previewImages.pan_card ? (
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
+
+                        <input
+                          type="file"
+                          onChange={(e) => handleFileUpload("pan_card", e)}
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className="hidden"
+                          id="pan-upload"
+                        />
+
+                        {formData.pan_card ? (
+                          <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-                                <Shield className="w-5 h-5" />
+                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                               </div>
                               <div>
-                                <p className="text-sm font-semibold text-gray-900">PAN Card Verified</p>
-                                <p className="text-xs text-gray-500">Document changes are locked for live restaurants</p>
+                                <p className="text-sm font-semibold text-emerald-900">New Document Selected</p>
+                                <p className="text-xs text-emerald-700 font-medium truncate max-w-xs">{formData.pan_card.name}</p>
                               </div>
                             </div>
-                            <a
-                              href={previewImages.pan_card}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 rounded-lg shadow-2xs hover:bg-emerald-50 transition cursor-pointer"
+                            <label
+                              htmlFor="pan-upload"
+                              className="px-3.5 py-2 text-xs font-semibold text-gray-700 hover:text-gray-900 bg-white border border-gray-300 rounded-lg shadow-2xs hover:bg-gray-50 transition cursor-pointer"
                             >
-                              View Document
-                            </a>
+                              Choose Different File
+                            </label>
+                          </div>
+                        ) : previewImages.pan_card ? (
+                          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">Current PAN Card Document</p>
+                                <p className="text-xs text-gray-500">Document saved in storage. View or click replace to upload a new one.</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <a
+                                href={previewImages.pan_card}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3.5 py-2 text-xs font-semibold text-blue-700 hover:text-blue-800 bg-white border border-blue-300 rounded-lg shadow-2xs hover:bg-blue-50 transition cursor-pointer"
+                              >
+                                View Document
+                              </a>
+                              <label
+                                htmlFor="pan-upload"
+                                className="px-3.5 py-2 text-xs font-semibold text-gray-700 hover:text-gray-900 bg-white border border-gray-300 rounded-lg shadow-2xs hover:bg-gray-50 transition cursor-pointer"
+                              >
+                                Replace Document
+                              </label>
+                            </div>
                           </div>
                         ) : (
                           <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                            <input
-                              type="file"
-                              onChange={(e) => handleFileUpload("pan_card", e)}
-                              accept=".pdf,.jpg,.jpeg,.png"
-                              className="hidden"
-                              id="pan-upload"
-                            />
                             <label htmlFor="pan-upload" className="cursor-pointer">
                               <div className="flex flex-col items-center gap-3">
                                 <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
@@ -2988,36 +3072,10 @@ export default function OnboardingForm() {
                                     <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                   </svg>
                                 </div>
-                                {formData.pan_card ? (
-                                  <div>
-                                    <p className="text-green-600 font-semibold">
-                                      ✓ {formData.pan_card.name}
-                                    </p>
-                                    <p className="text-sm text-gray-500 mt-1">Click to change</p>
-                                  </div>
-                                ) : previewImages.pan_card ? (
-                                  <div>
-                                    <p className="text-emerald-600 font-semibold">✓ Document Uploaded</p>
-                                    <div className="flex items-center justify-center gap-2 mt-1">
-                                      <a
-                                        href={previewImages.pan_card}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-blue-600 underline"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        View document
-                                      </a>
-                                      <span className="text-xs text-gray-400">•</span>
-                                      <span className="text-xs text-gray-500">Click to replace</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <p className="text-gray-800 font-semibold">{isUS ? "Upload Tax Document / EIN Letter" : "Upload PAN Card"}</p>
-                                    <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
-                                  </div>
-                                )}
+                                <div>
+                                  <p className="text-gray-800 font-semibold">{isUS ? "Upload Tax Document / EIN Letter" : "Upload PAN Card"}</p>
+                                  <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
+                                </div>
                               </div>
                             </label>
                           </div>
@@ -3087,42 +3145,72 @@ export default function OnboardingForm() {
                             <label className="block text-sm font-semibold text-gray-700">
                               GST Certificate <span className="text-red-500">*</span>
                             </label>
-                            {isLiveRestaurantEdit && previewImages.gst_certificate && (
+                            {previewImages.gst_certificate && (
                               <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                                <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                                Verified & Locked
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                Uploaded
                               </span>
                             )}
                           </div>
-                          {isLiveRestaurantEdit && previewImages.gst_certificate ? (
-                            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
+
+                          <input
+                            type="file"
+                            onChange={(e) => handleFileUpload("gst_certificate", e)}
+                            accept=".pdf,.jpg,.jpeg,.png"
+                            className="hidden"
+                            id="gst-upload"
+                          />
+
+                          {formData.gst_certificate ? (
+                            <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-4 flex items-center justify-between">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-                                  <Shield className="w-5 h-5" />
+                                  <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                                 </div>
                                 <div>
-                                  <p className="text-sm font-semibold text-gray-900">GST Certificate Verified</p>
-                                  <p className="text-xs text-gray-500">Document changes are locked for live restaurants</p>
+                                  <p className="text-sm font-semibold text-emerald-900">New Document Selected</p>
+                                  <p className="text-xs text-emerald-700 font-medium truncate max-w-xs">{formData.gst_certificate.name}</p>
                                 </div>
                               </div>
-                              <a
-                                href={previewImages.gst_certificate}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 rounded-lg shadow-2xs hover:bg-emerald-50 transition cursor-pointer"
+                              <label
+                                htmlFor="gst-upload"
+                                className="px-3.5 py-2 text-xs font-semibold text-gray-700 hover:text-gray-900 bg-white border border-gray-300 rounded-lg shadow-2xs hover:bg-gray-50 transition cursor-pointer"
                               >
-                                View Document
-                              </a>
+                                Choose Different File
+                              </label>
+                            </div>
+                          ) : previewImages.gst_certificate ? (
+                            <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                  </svg>
+                                </div>
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900">Current GST Certificate Document</p>
+                                  <p className="text-xs text-gray-500">Document saved in storage. View or click replace to upload a new one.</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <a
+                                  href={previewImages.gst_certificate}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-3.5 py-2 text-xs font-semibold text-blue-700 hover:text-blue-800 bg-white border border-blue-300 rounded-lg shadow-2xs hover:bg-blue-50 transition cursor-pointer"
+                                >
+                                  View Document
+                                </a>
+                                <label
+                                  htmlFor="gst-upload"
+                                  className="px-3.5 py-2 text-xs font-semibold text-gray-700 hover:text-gray-900 bg-white border border-gray-300 rounded-lg shadow-2xs hover:bg-gray-50 transition cursor-pointer"
+                                >
+                                  Replace Document
+                                </label>
+                              </div>
                             </div>
                           ) : (
                             <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                              <input
-                                type="file"
-                                onChange={(e) => handleFileUpload("gst_certificate", e)}
-                                accept=".pdf,.jpg,.jpeg,.png"
-                                className="hidden"
-                                id="gst-upload"
-                              />
                               <label htmlFor="gst-upload" className="cursor-pointer">
                                 <div className="flex flex-col items-center gap-3">
                                   <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
@@ -3134,38 +3222,10 @@ export default function OnboardingForm() {
                                       <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                     </svg>
                                   </div>
-                                  {formData.gst_certificate ? (
-                                    <div>
-                                      <p className="text-green-600 font-semibold">
-                                        ✓ {formData.gst_certificate.name}
-                                      </p>
-                                      <p className="text-sm text-gray-500 mt-1">Click to change</p>
-                                    </div>
-                                  ) : previewImages.gst_certificate ? (
-                                    <div>
-                                      <p className="text-emerald-600 font-semibold">✓ Document Uploaded</p>
-                                      <div className="flex items-center justify-center gap-2 mt-1">
-                                        <a
-                                          href={previewImages.gst_certificate}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="text-xs text-blue-600 underline"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          View document
-                                        </a>
-                                        <span className="text-xs text-gray-400">•</span>
-                                        <span className="text-xs text-gray-500">Click to replace</span>
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <div>
-                                      <p className="text-gray-800 font-semibold">
-                                        Upload GST Certificate
-                                      </p>
-                                      <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
-                                    </div>
-                                  )}
+                                  <div>
+                                    <p className="text-gray-800 font-semibold">Upload GST Certificate</p>
+                                    <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
+                                  </div>
                                 </div>
                               </label>
                             </div>
@@ -3236,42 +3296,72 @@ export default function OnboardingForm() {
                           <label className="block text-sm font-semibold text-gray-700">
                             {isUS ? "Health Permit Document" : "FSSAI License Certificate"} {isUS ? <span className="text-gray-400 font-normal text-xs ml-1">(Optional)</span> : <span className="text-red-500">*</span>}
                           </label>
-                          {isLiveRestaurantEdit && previewImages.fssai_license && (
+                          {previewImages.fssai_license && (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-                              <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                              Verified & Locked
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              Uploaded
                             </span>
                           )}
                         </div>
-                        {isLiveRestaurantEdit && previewImages.fssai_license ? (
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 flex items-center justify-between">
+
+                        <input
+                          type="file"
+                          onChange={(e) => handleFileUpload("fssai_license", e)}
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className="hidden"
+                          id="fssai-upload"
+                        />
+
+                        {formData.fssai_license ? (
+                          <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-4 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                               <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-                                <Shield className="w-5 h-5" />
+                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                               </div>
                               <div>
-                                <p className="text-sm font-semibold text-gray-900">FSSAI License Verified</p>
-                                <p className="text-xs text-gray-500">Document changes are locked for live restaurants</p>
+                                <p className="text-sm font-semibold text-emerald-900">New Document Selected</p>
+                                <p className="text-xs text-emerald-700 font-medium truncate max-w-xs">{formData.fssai_license.name}</p>
                               </div>
                             </div>
-                            <a
-                              href={previewImages.fssai_license}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-3.5 py-2 text-xs font-semibold text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 rounded-lg shadow-2xs hover:bg-emerald-50 transition cursor-pointer"
+                            <label
+                              htmlFor="fssai-upload"
+                              className="px-3.5 py-2 text-xs font-semibold text-gray-700 hover:text-gray-900 bg-white border border-gray-300 rounded-lg shadow-2xs hover:bg-gray-50 transition cursor-pointer"
                             >
-                              View Document
-                            </a>
+                              Choose Different File
+                            </label>
+                          </div>
+                        ) : previewImages.fssai_license ? (
+                          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </div>
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">Current FSSAI License Document</p>
+                                <p className="text-xs text-gray-500">Document saved in storage. View or click replace to upload a new one.</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <a
+                                href={previewImages.fssai_license}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-3.5 py-2 text-xs font-semibold text-blue-700 hover:text-blue-800 bg-white border border-blue-300 rounded-lg shadow-2xs hover:bg-blue-50 transition cursor-pointer"
+                              >
+                                View Document
+                              </a>
+                              <label
+                                htmlFor="fssai-upload"
+                                className="px-3.5 py-2 text-xs font-semibold text-gray-700 hover:text-gray-900 bg-white border border-gray-300 rounded-lg shadow-2xs hover:bg-gray-50 transition cursor-pointer"
+                              >
+                                Replace Document
+                              </label>
+                            </div>
                           </div>
                         ) : (
                           <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-orange-500 transition cursor-pointer">
-                            <input
-                              type="file"
-                              onChange={(e) => handleFileUpload("fssai_license", e)}
-                              accept=".pdf,.jpg,.jpeg,.png"
-                              className="hidden"
-                              id="fssai-upload"
-                            />
                             <label htmlFor="fssai-upload" className="cursor-pointer">
                               <div className="flex flex-col items-center gap-3">
                                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
@@ -3283,36 +3373,10 @@ export default function OnboardingForm() {
                                     <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                   </svg>
                                 </div>
-                                {formData.fssai_license ? (
-                                  <div>
-                                    <p className="text-green-600 font-semibold">
-                                      ✓ {formData.fssai_license.name}
-                                    </p>
-                                    <p className="text-sm text-gray-500 mt-1">Click to change</p>
-                                  </div>
-                                ) : previewImages.fssai_license ? (
-                                  <div>
-                                    <p className="text-emerald-600 font-semibold">✓ Document Uploaded</p>
-                                    <div className="flex items-center justify-center gap-2 mt-1">
-                                      <a
-                                        href={previewImages.fssai_license}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-blue-600 underline"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        View document
-                                      </a>
-                                      <span className="text-xs text-gray-400">•</span>
-                                      <span className="text-xs text-gray-500">Click to replace</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <p className="text-gray-800 font-semibold">Upload FSSAI License</p>
-                                    <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
-                                  </div>
-                                )}
+                                <div>
+                                  <p className="text-gray-800 font-semibold">{isUS ? "Upload Health Permit Document" : "Upload FSSAI License"}</p>
+                                  <p className="text-sm text-gray-500 mt-1">PDF, JPG, PNG up to 5MB</p>
+                                </div>
                               </div>
                             </label>
                           </div>
@@ -3422,8 +3486,8 @@ export default function OnboardingForm() {
                 </div>
               )}
 
-              {/* STEP 4: Platform & Domains (Staff & Super Admin) */}
-              {currentStep === 4 && isStaffOrAdmin && (
+              {/* STEP 4: Platform & Domains (Staff & Super Admin - Creation Only) */}
+              {currentStep === 4 && isStaffOrAdmin && !editRestaurantId && (
                 <div className="space-y-8 animate-in fade-in duration-150">
                   <div>
                     <div className="flex items-center gap-2 mb-1">

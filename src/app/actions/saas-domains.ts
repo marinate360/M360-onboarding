@@ -8,6 +8,7 @@ export interface DomainCheckResult {
   subdomain: string;
   fullDomain: string;
   isCustomDomain?: boolean;
+  isCurrentDomain?: boolean;
   reason?: string;
   suggestions?: string[];
   error?: string;
@@ -36,26 +37,11 @@ function getSaasConfig() {
   return { baseUrl, token };
 }
 
-function cleanSubdomainInput(input: string): string {
-  let cleaned = input.trim().toLowerCase();
-  // Strip protocol
-  cleaned = cleaned.replace(/^https?:\/\//, "");
-  // Strip marinate360.com or any trailing domain
-  cleaned = cleaned.split(".")[0];
-  // Keep only alphanumeric and hyphen
-  cleaned = cleaned.replace(/[^a-z0-9-]/g, "");
-  // Strip leading or trailing hyphens
-  cleaned = cleaned.replace(/^-+|-+$/g, "");
-  return cleaned;
-}
-
-function cleanCustomDomainInput(input: string): string {
-  let cleaned = input.trim().toLowerCase();
-  cleaned = cleaned.replace(/^https?:\/\//, "");
-  cleaned = cleaned.replace(/\/+$/, "");
-  cleaned = cleaned.replace(/[^a-z0-9.-]/g, "");
-  return cleaned;
-}
+import {
+  cleanSubdomainInput,
+  cleanCustomDomainInput,
+  extractTenantKey,
+} from "@/src/lib/utils/domain";
 
 /**
  * Check if a domain (subdomain or custom domain) is already in use in Supabase database
@@ -64,8 +50,25 @@ async function checkSupabaseDomain(
   domainOrSubdomain: string,
   excludeRestaurantId?: string,
   isCustomDomain: boolean = false
-): Promise<{ taken: boolean; reason?: string }> {
+): Promise<{ taken: boolean; isOwnDomain?: boolean; reason?: string }> {
   const admin = getSupabaseAdmin();
+
+  // If excludeRestaurantId is provided, check if this is the restaurant's own current domain
+  if (excludeRestaurantId) {
+    const { data: ownRest } = await admin
+      .from("restaurants")
+      .select("id, domain_name, domain_url")
+      .eq("id", excludeRestaurantId)
+      .maybeSingle();
+
+    if (ownRest) {
+      const ownKey = extractTenantKey(ownRest.domain_url || ownRest.domain_name);
+      const targetKey = extractTenantKey(domainOrSubdomain);
+      if (ownKey && targetKey && ownKey === targetKey) {
+        return { taken: false, isOwnDomain: true };
+      }
+    }
+  }
 
   // 1. Check restaurants table
   let restQuery = admin.from("restaurants").select("id, restaurant_name, domain_name, domain_url");
@@ -167,11 +170,19 @@ export async function checkDomainAvailability(
       };
     }
 
-    const [dbResult, saasResult] = await Promise.all([
-      checkSupabaseDomain(customDomain, excludeRestaurantId, true),
-      checkSaasApiDomain(customDomain),
-    ]);
+    const dbResult = await checkSupabaseDomain(customDomain, excludeRestaurantId, true);
+    if (dbResult.isOwnDomain) {
+      return {
+        ok: true,
+        available: true,
+        subdomain: customDomain,
+        fullDomain: customDomain,
+        isCustomDomain: true,
+        isCurrentDomain: true,
+      };
+    }
 
+    const saasResult = await checkSaasApiDomain(customDomain);
     const isTaken = dbResult.taken || saasResult.taken;
     const reason = dbResult.reason || saasResult.reason;
 
@@ -199,12 +210,19 @@ export async function checkDomainAvailability(
     };
   }
 
-  // Dual Check: Supabase DB + SaaS API
-  const [dbResult, saasResult] = await Promise.all([
-    checkSupabaseDomain(subdomain, excludeRestaurantId, false),
-    checkSaasApiDomain(subdomain),
-  ]);
+  const dbResult = await checkSupabaseDomain(subdomain, excludeRestaurantId, false);
+  if (dbResult.isOwnDomain) {
+    return {
+      ok: true,
+      available: true,
+      subdomain,
+      fullDomain: `${subdomain}.marinate360.com`,
+      isCustomDomain: false,
+      isCurrentDomain: true,
+    };
+  }
 
+  const saasResult = await checkSaasApiDomain(subdomain);
   const isTaken = dbResult.taken || saasResult.taken;
   const reason = dbResult.reason || saasResult.reason;
 
@@ -247,10 +265,7 @@ export async function createSaasTenant(
   cluster: string = "origin-1.marinate360.com",
   status: "active" | "inactive" = "active"
 ): Promise<{ ok: boolean; data?: unknown; error?: string }> {
-  const isCustom = domainOrSubdomainInput.includes(".");
-  const key = isCustom
-    ? cleanCustomDomainInput(domainOrSubdomainInput)
-    : cleanSubdomainInput(domainOrSubdomainInput);
+  const key = extractTenantKey(domainOrSubdomainInput);
 
   if (!key) {
     return { ok: false, error: "Invalid domain or subdomain." };
@@ -349,10 +364,7 @@ export async function getSaasTenants(
 export async function deleteSaasTenant(
   domainOrSubdomainInput: string
 ): Promise<{ ok: boolean; error?: string }> {
-  const isCustom = domainOrSubdomainInput.includes(".");
-  const key = isCustom
-    ? cleanCustomDomainInput(domainOrSubdomainInput)
-    : cleanSubdomainInput(domainOrSubdomainInput);
+  const key = extractTenantKey(domainOrSubdomainInput);
 
   if (!key) {
     return { ok: false, error: "Invalid domain or subdomain." };
@@ -374,7 +386,7 @@ export async function deleteSaasTenant(
       cache: "no-store",
     });
 
-    if (!res.ok) {
+    if (!res.ok && res.status !== 404) {
       const errText = await res.text().catch(() => "Unknown error");
       return { ok: false, error: `Failed to delete tenant (${res.status}): ${errText}` };
     }

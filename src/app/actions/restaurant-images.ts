@@ -87,6 +87,11 @@ export async function deleteRestaurantAsset(storagePathOrUrl?: string | null) {
     path = parts.slice(parts.indexOf(IMAGE_BUCKET) + 1).join("/");
   }
 
+  path = path.split("?")[0].split("#")[0];
+  try {
+    path = decodeURIComponent(path);
+  } catch {}
+
   if (!path) return;
 
   try {

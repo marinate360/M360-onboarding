@@ -65,6 +65,7 @@ import { formatAddress } from "@/src/lib/utils/address";
 import UsersManagementView from "./admin/UsersManagementView";
 import SelectPackageModal from "@/src/components/modals/SelectPackageModal";
 import EditRestaurantModal from "@/src/components/modals/EditRestaurantModal";
+import RestaurantDomainsTab from "./admin/RestaurantDomainsTab";
 
 type Props = {
   accessToken: string;
@@ -73,7 +74,7 @@ type Props = {
 };
 
 type AdminView = "overview" | "applications" | "restaurants" | "users" | "logs" | "settings";
-type RestaurantPanelTab = "overview" | "settings";
+type RestaurantPanelTab = "overview" | "settings" | "domains";
 
 const STATUS_TABS: Array<ApplicationStatus | "all"> = ["all", "pending", "accepted", "rejected"];
 const PACKAGES = ["marinate-menu", "marinate-dinein", "marinate360", "marinate-foodtruck"];
@@ -627,6 +628,14 @@ export default function AdminDashboard({
                   onAddSetting={handleAddSetting}
                   onUpdateSetting={handleUpdateSetting}
                   onRemoveSetting={handleRemoveSetting}
+                  accessToken={accessToken}
+                  userRole={currentProfile.role}
+                  onRestaurantUpdated={(updated) => {
+                    setSelectedRestaurant(updated);
+                    setRestaurants((prev) =>
+                      prev.map((r) => (r.id === updated.id ? updated : r))
+                    );
+                  }}
                 />
               ) : (
                 <RestaurantsGrid
@@ -1575,7 +1584,7 @@ function RestaurantsGrid({
 
               <div className="mt-6 flex items-center justify-between">
                 <span className="inline-flex items-center gap-2 text-sm font-semibold text-orange-600">
-                  Open workspace
+                  Open Restaurant
                   <ChevronRight size={16} className="transition group-hover:translate-x-0.5" />
                 </span>
                 {onEdit && (
@@ -2105,6 +2114,9 @@ function RestaurantWorkspace({
   onAddSetting,
   onUpdateSetting,
   onRemoveSetting,
+  accessToken,
+  userRole = "super_admin",
+  onRestaurantUpdated,
 }: {
   restaurant: RestaurantRecord;
   settings: RestaurantSetting[];
@@ -2117,6 +2129,9 @@ function RestaurantWorkspace({
   onAddSetting: (definition: RestaurantSettingDefinition) => void;
   onUpdateSetting: (settingKey: string, settingValue: string) => void;
   onRemoveSetting: (settingKey: string) => void;
+  accessToken: string;
+  userRole?: string;
+  onRestaurantUpdated: (updated: RestaurantRecord) => void;
 }) {
   const settingsMap = useMemo(() => new Map(settings.map((item) => [item.setting_key, item])), [settings]);
   const missingSettings = RESTAURANT_SETTING_DEFINITIONS.filter((definition) => !settingsMap.has(definition.key));
@@ -2158,6 +2173,7 @@ function RestaurantWorkspace({
         <div className="border-b border-zinc-100 px-4 py-3">
           <div className="flex flex-wrap gap-2">
             <TabButton label="Overview" active={activeTab === "overview"} onClick={() => onTabChange("overview")} />
+            <TabButton label="Domains" active={activeTab === "domains"} onClick={() => onTabChange("domains")} />
             <TabButton label="Settings" active={activeTab === "settings"} onClick={() => onTabChange("settings")} />
           </div>
         </div>
@@ -2253,6 +2269,13 @@ function RestaurantWorkspace({
                 </div>
               )}
             </div>
+          ) : activeTab === "domains" ? (
+            <RestaurantDomainsTab
+              restaurant={restaurant}
+              accessToken={accessToken}
+              userRole={userRole}
+              onRestaurantUpdated={onRestaurantUpdated}
+            />
           ) : (
             <div className="space-y-5">
               <div>

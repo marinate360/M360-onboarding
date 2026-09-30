@@ -2,7 +2,7 @@
 
 import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { revalidatePath } from "next/cache";
-import { uploadRestaurantAsset, type StoredAsset } from "./restaurant-images";
+import { uploadRestaurantAsset, deleteRestaurantAsset, type StoredAsset } from "./restaurant-images";
 import {
   getSupabaseAdmin,
   getUserFromAccessToken,
@@ -158,9 +158,9 @@ export async function submitOnboardingApplication(formData: FormData): Promise<A
     const assetEntries: Array<[string, string]> = [
       ["logo_url", "logo"],
       ["background_image_url", "background"],
-      ["pan_card", "certificates"],
-      ["gst_certificate", "certificates"],
-      ["fssai_license", "certificates"],
+      ["pan_card", "pan_card"],
+      ["gst_certificate", "gst_certificate"],
+      ["fssai_license", "fssai_license"],
     ];
 
     const uploaded: Record<string, StoredAsset> = {};
@@ -613,11 +613,15 @@ export async function updateMyOnboardingApplicationWithFormData(
     const currentImages = { ...((existing.images || {}) as Record<string, StoredAsset>) };
     const currentDocuments = { ...((existing.documents || {}) as Record<string, StoredAsset>) };
 
-    // Handle document removals
+    // Handle document removals & delete from storage
     const removeKeysStr = String(formData.get("remove_keys") || "[]");
     try {
       const removeKeys = JSON.parse(removeKeysStr) as string[];
       for (const key of removeKeys) {
+        const oldAsset = currentImages[key] || currentDocuments[key];
+        if (oldAsset?.storage_path) {
+          await deleteRestaurantAsset(oldAsset.storage_path);
+        }
         delete currentImages[key];
         delete currentDocuments[key];
       }
@@ -625,18 +629,26 @@ export async function updateMyOnboardingApplicationWithFormData(
       // ignore
     }
 
-    // Handle newly uploaded files
+    // Handle newly uploaded files & delete replaced files from storage
     const assetEntries: Array<[string, string]> = [
       ["logo_url", "logo"],
       ["background_image_url", "background"],
-      ["pan_card", "certificates"],
-      ["gst_certificate", "certificates"],
-      ["fssai_license", "certificates"],
+      ["pan_card", "pan_card"],
+      ["gst_certificate", "gst_certificate"],
+      ["fssai_license", "fssai_license"],
     ];
 
     for (const [formKey, imageType] of assetEntries) {
       const file = formData.get(formKey);
       if (file instanceof File && file.size > 0) {
+        // Delete old asset from storage
+        const oldAsset = ["logo_url", "background_image_url"].includes(formKey)
+          ? currentImages[formKey]
+          : currentDocuments[formKey];
+        if (oldAsset?.storage_path) {
+          await deleteRestaurantAsset(oldAsset.storage_path);
+        }
+
         const stored = await uploadRestaurantAsset(domainName, imageType, file);
         if (["logo_url", "background_image_url"].includes(formKey)) {
           currentImages[formKey] = stored;

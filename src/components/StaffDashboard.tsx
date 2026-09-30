@@ -53,6 +53,7 @@ import SelectPackageModal from "@/src/components/modals/SelectPackageModal";
 import UsersManagementView from "@/src/components/admin/UsersManagementView";
 import EditRestaurantModal from "@/src/components/modals/EditRestaurantModal";
 import AccountSettingsView from "@/src/components/admin/AccountSettingsView";
+import RestaurantDomainsTab from "@/src/components/admin/RestaurantDomainsTab";
 
 type Props = {
   accessToken: string;
@@ -61,7 +62,7 @@ type Props = {
 };
 
 type StaffView = "overview" | "restaurants" | "users" | "settings";
-type RestaurantPanelTab = "overview" | "settings";
+type RestaurantPanelTab = "overview" | "settings" | "domains";
 
 const PACKAGES = ["marinate-menu", "marinate-dinein", "marinate360", "marinate-foodtruck"];
 
@@ -607,6 +608,14 @@ export default function StaffDashboard({ accessToken, profile, onLogout }: Props
                   onTabChange={setRestaurantPanelTab}
                   onBack={() => setSelectedRestaurantId("")}
                   onEdit={() => router.push(`/onboarding?editRestaurantId=${encodeURIComponent(selectedRestaurant.id)}`)}
+                  accessToken={accessToken}
+                  userRole={currentProfile.role}
+                  onRestaurantUpdated={(updated) => {
+                    setSelectedRestaurant(updated);
+                    setRestaurants((prev) =>
+                      prev.map((r) => (r.id === updated.id ? updated : r))
+                    );
+                  }}
                 />
               ) : (
                 <section className="space-y-5">
@@ -951,6 +960,9 @@ function StaffRestaurantWorkspace({
   onTabChange,
   onBack,
   onEdit,
+  accessToken,
+  userRole = "staff",
+  onRestaurantUpdated,
 }: {
   restaurant: RestaurantRecord;
   settings: RestaurantSetting[];
@@ -958,6 +970,9 @@ function StaffRestaurantWorkspace({
   onTabChange: (value: RestaurantPanelTab) => void;
   onBack: () => void;
   onEdit: () => void;
+  accessToken: string;
+  userRole?: string;
+  onRestaurantUpdated: (updated: RestaurantRecord) => void;
 }) {
   const settingsMap = useMemo(() => new Map(settings.map((item) => [item.setting_key, item])), [settings]);
   const missingSettings = RESTAURANT_SETTING_DEFINITIONS.filter((definition) => !settingsMap.has(definition.key));
@@ -1010,6 +1025,14 @@ function StaffRestaurantWorkspace({
               }`}
             >
               Overview
+            </button>
+            <button
+              onClick={() => onTabChange("domains")}
+              className={`rounded-md px-3 py-2 text-sm font-semibold ${
+                activeTab === "domains" ? "bg-orange-500 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+              }`}
+            >
+              Domains
             </button>
             <button
               onClick={() => onTabChange("settings")}
@@ -1114,6 +1137,13 @@ function StaffRestaurantWorkspace({
                 </div>
               )}
             </div>
+          ) : activeTab === "domains" ? (
+            <RestaurantDomainsTab
+              restaurant={restaurant}
+              accessToken={accessToken}
+              userRole={userRole}
+              onRestaurantUpdated={onRestaurantUpdated}
+            />
           ) : (
             <div className="space-y-5">
               <div className="grid gap-3 md:grid-cols-2">
