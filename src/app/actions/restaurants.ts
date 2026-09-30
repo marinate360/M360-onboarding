@@ -23,6 +23,7 @@ import { formatAddress, buildStructuredAddress, parseStructuredAddress } from "@
 import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { getServicesForPackage } from "@/src/lib/constants/restaurant-options";
 import { createSaasTenant, deleteSaasTenant } from "./saas-domains";
+import { sendRestaurantWelcomeEmail } from "@/src/lib/email/service";
 
 export type RestaurantRecord = {
   id: string;
@@ -290,32 +291,73 @@ export async function approveOnboardingApplication(
       ctx.restaurantId = restaurant.id;
       await insertRestaurantImageRecords(restaurant.id, allAssets);
 
-      if (app.submitted_by) {
-        const { data: currentProfile } = await admin
-          .from("profiles")
-          .select("restaurant_id, restaurant_ids")
-          .eq("id", app.submitted_by)
-          .single();
+      // Provision or link owner account for the application
+      let generatedAppPassword: string | null = null;
+      const targetAppEmail = app.email ? app.email.trim().toLowerCase() : null;
+      const appOwnerName = app.owner_name || app.restaurant_name;
 
-        const existingIds = Array.isArray(currentProfile?.restaurant_ids)
-          ? currentProfile.restaurant_ids
-          : currentProfile?.restaurant_id
-          ? [currentProfile.restaurant_id]
-          : [];
+      if (targetAppEmail || app.submitted_by) {
+        try {
+          const profileQuery = app.submitted_by
+            ? admin.from("profiles").select("id, restaurant_id, restaurant_ids, role").eq("id", app.submitted_by).maybeSingle()
+            : admin.from("profiles").select("id, restaurant_id, restaurant_ids, role").eq("email", targetAppEmail).maybeSingle();
 
-        const updatedIds = Array.from(new Set([...existingIds, restaurant.id]));
+          const { data: currentProfile } = await profileQuery;
 
-        const { error: profileError } = await admin
-          .from("profiles")
-          .update({
-            restaurant_id: currentProfile?.restaurant_id || restaurant.id,
-            restaurant_ids: updatedIds,
-            role: "admin",
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", app.submitted_by);
+          if (currentProfile) {
+            const existingIds = Array.isArray(currentProfile?.restaurant_ids)
+              ? currentProfile.restaurant_ids
+              : currentProfile?.restaurant_id
+              ? [currentProfile.restaurant_id]
+              : [];
 
-        if (profileError) throw new Error(profileError.message);
+            const updatedIds = Array.from(new Set([...existingIds, restaurant.id]));
+
+            const { error: profileError } = await admin
+              .from("profiles")
+              .update({
+                restaurant_id: currentProfile?.restaurant_id || restaurant.id,
+                restaurant_ids: updatedIds,
+                role: "admin",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", currentProfile.id);
+
+            if (profileError) throw new Error(profileError.message);
+          } else if (targetAppEmail) {
+            // No profile found: provision new auth user with auto-generated password
+            const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+            const autoPassword = `marinate@${randomSuffix}`;
+            generatedAppPassword = autoPassword;
+
+            const { data: createdAuthUser, error: authCreateErr } = await admin.auth.admin.createUser({
+              email: targetAppEmail,
+              password: autoPassword,
+              email_confirm: true,
+              user_metadata: {
+                username: appOwnerName,
+                full_name: appOwnerName,
+                role: "admin",
+              },
+            });
+
+            if (createdAuthUser?.user?.id) {
+              await admin.from("profiles").upsert({
+                id: createdAuthUser.user.id,
+                email: targetAppEmail,
+                username: appOwnerName,
+                role: "admin",
+                restaurant_id: restaurant.id,
+                restaurant_ids: [restaurant.id],
+                updated_at: new Date().toISOString(),
+              });
+            } else if (authCreateErr) {
+              console.warn("[Approve] Could not create auth user for app email:", authCreateErr.message);
+            }
+          }
+        } catch (linkErr) {
+          console.warn("[Approve] Error syncing profile for approved restaurant:", linkErr);
+        }
       }
 
       const { error: updateError } = await admin
@@ -341,6 +383,24 @@ export async function approveOnboardingApplication(
         message: `Approved onboarding and created restaurant ${app.restaurant_name}.`,
         metadata: { domain_name: cleanDomain, submitted_by: app.submitted_by },
       });
+
+      // Send approval welcome email with credentials & password change notice
+      if (targetAppEmail) {
+        try {
+          await sendRestaurantWelcomeEmail({
+            ownerName: appOwnerName,
+            email: targetAppEmail,
+            restaurantName: app.restaurant_name,
+            domainUrl: defaultDomainUrl,
+            posDomain: defaultPosDomain,
+            packageName: app.package || "Marinate Menu",
+            temporaryPassword: generatedAppPassword,
+            mustChangePassword: Boolean(generatedAppPassword),
+          });
+        } catch (emailErr) {
+          console.warn("[Approve] Failed sending approval welcome email:", emailErr);
+        }
+      }
 
       revalidatePath("/dashboard");
       return { ok: true, data: { restaurantId: restaurant.id } };
@@ -867,6 +927,24 @@ export async function createRestaurantWithFormData(
         message: `Created restaurant ${payload.restaurant_name} with files.`,
         metadata: { domain_name: domainName, package: payload.package, logo_uploaded: Boolean(logoUrl) },
       });
+
+      // Dispatch welcome email with login credentials and change password instructions
+      if (targetEmail) {
+        try {
+          await sendRestaurantWelcomeEmail({
+            ownerName: payload.fullname || targetEmail.split("@")[0],
+            email: targetEmail,
+            restaurantName: payload.restaurant_name,
+            domainUrl: defaultDomainUrl,
+            posDomain: defaultPosDomain,
+            packageName: payload.package || "marinate-menu",
+            temporaryPassword: generatedAdminPassword,
+            mustChangePassword: Boolean(generatedAdminPassword),
+          });
+        } catch (emailErr) {
+          console.warn("[Restaurant Creation] Failed sending welcome email:", emailErr);
+        }
+      }
 
       revalidatePath("/dashboard");
       return {

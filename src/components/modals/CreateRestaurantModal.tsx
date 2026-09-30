@@ -173,7 +173,17 @@ export default function CreateRestaurantModal({ accessToken, onClose, onCreated 
 
       const result = await createRestaurantWithFormData(formData);
       if (result.ok) {
-        toast.success(`Restaurant "${restaurantName}" created successfully!`);
+        if (result.data?.adminPassword) {
+          toast.success(
+            `Restaurant "${restaurantName}" created! Login credentials & temporary password sent to ${email.trim()}.`,
+            { duration: 8000 }
+          );
+        } else {
+          toast.success(
+            `Restaurant "${restaurantName}" created successfully! Confirmation sent to ${email.trim() || "owner"}.`,
+            { duration: 5000 }
+          );
+        }
         onCreated(result.data.restaurantId);
       } else {
         toast.error(result.error || "Failed to create restaurant.");

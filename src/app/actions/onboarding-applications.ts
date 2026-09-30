@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { fetchAllPaginatedRows } from "@/src/lib/utils/supabase-pagination";
 import { revalidatePath } from "next/cache";
@@ -11,6 +11,7 @@ import {
   type ActionResult,
 } from "./supabase/server";
 import { writeAuditLog, loggedAction } from "./app-logs";
+import { handleOnboardingApplicationEmails } from "@/src/lib/email/service";
 
 export type ApplicationStatus = "pending" | "accepted" | "rejected";
 
@@ -241,6 +242,22 @@ export async function submitOnboardingApplication(formData: FormData): Promise<A
         duration_ms: Date.now() - start,
       },
     });
+
+    // Dispatch email notifications to admin (nexodigitalsolutions@gmail.com) and applicant confirmation
+    try {
+      await handleOnboardingApplicationEmails({
+        applicationId: data.id,
+        restaurantName: payload.restaurant_name,
+        ownerName: payload.fullname || payload.restaurant_name,
+        customerEmail: payload.email,
+        customerPhone: payload.restaurant_primary_contact || payload.phone,
+        packageName: payload.package || "marinate-menu",
+        cuisines: payload.cuisines || [],
+        city: payload.city || payload.address || "",
+      });
+    } catch (emailErr) {
+      console.warn("[Onboarding] Failed sending application emails:", emailErr);
+    }
 
     revalidatePath("/dashboard");
     return { ok: true, data: { id: data.id } };

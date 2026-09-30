@@ -112,7 +112,7 @@ export function Header() {
         <div
           className={`mx-auto flex max-w-7xl items-center justify-between rounded-2xl px-4 transition-all duration-300 sm:px-6 ${
             isScrolled
-              ? "h-16 border border-white/16 bg-black/40 shadow-2xl shadow-zinc-950/20 backdrop-blur-2xl"
+              ? "h-16 border border-white/16 bg-white/80 shadow-2xl shadow-zinc-950/20 backdrop-blur-2xl"
               : "h-20 border border-transparent bg-transparent shadow-none"
           }`}
         >
@@ -157,7 +157,7 @@ export function Header() {
               <Link
                 href="/login"
                 className={`inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
-                  isScrolled ? "border border-white/20 bg-white/12 text-white backdrop-blur hover:bg-white/20" : "bg-white text-zinc-950 shadow-md hover:bg-orange-50"
+                  isScrolled ? "border border-black/20 bg-black/12 text-black backdrop-blur hover:bg-black/20" : "bg-white text-zinc-950 shadow-md hover:bg-orange-50"
                 }`}
               >
                 <LogIn size={16} />

@@ -69,7 +69,7 @@ export default function SignupPage() {
 
   return (
     <main className="min-h-screen bg-[#fff7ed] px-4 py-8 text-zinc-950">
-      <div className="mx-auto max-w-md pb-4">
+      {/* <div className="mx-auto max-w-md pb-4">
         <Link
           href="/"
           className="inline-flex items-center gap-2 rounded-lg border border-orange-200/80 bg-white/90 px-3.5 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition hover:border-orange-300 hover:bg-white hover:text-orange-600"
@@ -77,7 +77,7 @@ export default function SignupPage() {
           <ArrowLeft size={14} />
           Back to Home
         </Link>
-      </div>
+      </div> */}
 
       <div className="mx-auto flex min-h-[calc(100vh-8rem)] max-w-md items-center">
         <section className="w-full rounded-2xl border border-orange-100 bg-white p-6 shadow-xl shadow-orange-100/70 sm:p-8">
@@ -89,13 +89,6 @@ export default function SignupPage() {
               <h1 className="text-2xl font-bold">Create your account</h1>
               <p className="mt-1 text-xs text-zinc-500">Register first, then submit your restaurant onboarding form.</p>
             </div>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-zinc-500 hover:bg-orange-50 hover:text-orange-700"
-            >
-              <ArrowLeft size={13} />
-              Home
-            </Link>
           </div>
 
           {success && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}
