@@ -112,7 +112,7 @@ export function Header() {
         <div
           className={`mx-auto flex max-w-7xl items-center justify-between rounded-2xl px-4 transition-all duration-300 sm:px-6 ${
             isScrolled
-              ? "h-16 border border-white/16 bg-white/80 shadow-2xl shadow-zinc-950/20 backdrop-blur-2xl"
+              ? "h-16 border border-zinc-200/80 bg-white/85 shadow-xl shadow-zinc-950/5 backdrop-blur-2xl"
               : "h-20 border border-transparent bg-transparent shadow-none"
           }`}
         >
@@ -126,7 +126,9 @@ export function Header() {
                 <button
                   onClick={() => setShowProfileDropdown((value) => !value)}
                   className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                    isScrolled ? "border border-white/16 bg-white/12 text-white backdrop-blur hover:bg-white/20" : "bg-white text-zinc-900 shadow-md hover:bg-orange-50"
+                    isScrolled
+                      ? "border border-zinc-200/80 bg-white/90 text-zinc-900 shadow-xs backdrop-blur hover:bg-orange-50"
+                      : "bg-white text-zinc-900 shadow-md hover:bg-orange-50"
                   }`}
                 >
                   <span className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-500 text-sm font-semibold text-white">
@@ -157,7 +159,9 @@ export function Header() {
               <Link
                 href="/login"
                 className={`inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition ${
-                  isScrolled ? "border border-black/20 bg-black/12 text-black backdrop-blur hover:bg-black/20" : "bg-white text-zinc-950 shadow-md hover:bg-orange-50"
+                  isScrolled
+                    ? "border border-zinc-200/80 bg-white/90 text-zinc-900 shadow-xs backdrop-blur hover:bg-orange-50"
+                    : "bg-white text-zinc-950 shadow-md hover:bg-orange-50"
                 }`}
               >
                 <LogIn size={16} />
@@ -170,7 +174,9 @@ export function Header() {
             aria-label="Open menu"
             onClick={() => setIsMenuOpen(true)}
             className={`inline-flex h-10 w-10 items-center justify-center rounded-full transition md:hidden ${
-              isScrolled ? "border border-white/16 bg-white/10 text-white backdrop-blur hover:bg-white/18" : "bg-white text-zinc-950 shadow-md"
+              isScrolled
+                ? "border border-zinc-200/80 bg-white/90 text-zinc-900 shadow-xs backdrop-blur hover:bg-zinc-100"
+                : "bg-white text-zinc-950 shadow-md"
             }`}
           >
             <Menu size={20} />
