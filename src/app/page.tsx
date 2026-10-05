@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BarChart3, Check, ChefHat, ChevronDown, ClipboardCheck, QrCode, Settings2, Star, Truck, X } from "lucide-react";
+import { BarChart3, Check, ChefHat, ChevronDown, ChevronUp, ClipboardCheck, Plus, QrCode, Settings2, Star, Truck, X } from "lucide-react";
 import { Header } from "@/src/layout/Header";
 import { Footer } from "@/src/layout/Footer";
 import { supabase } from "@/src/lib/supabase/client";
@@ -39,6 +39,7 @@ const PACKAGES = {
 export default function HomePage() {
   const router = useRouter();
   const [showPackages, setShowPackages] = useState(false);
+  const [showAddons, setShowAddons] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<keyof typeof PACKAGES>("marinate-menu");
 
   const selected = useMemo(() => PACKAGES[selectedPackage], [selectedPackage]);
@@ -183,30 +184,97 @@ export default function HomePage() {
                 <X size={20} />
               </button>
             </div>
-            <div className="grid gap-3 p-5 sm:grid-cols-2">
-              {Object.entries(PACKAGES).map(([id, pkg]) => {
-                const active = selectedPackage === id;
-                return (
-                  <button
-                    key={id}
-                    onClick={() => setSelectedPackage(id as keyof typeof PACKAGES)}
-                    className={`rounded-lg border p-4 text-left ${active ? "border-orange-500 bg-orange-50" : "border-zinc-200 hover:bg-zinc-50"}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="font-semibold">{pkg.label}</h3>
-                      {active && <Check size={18} className="text-orange-600" />}
-                    </div>
-                    <ul className="mt-3 space-y-2 text-sm text-zinc-600">
-                      {pkg.points.map((point) => (
-                        <li key={point} className="flex gap-2">
-                          <Check size={16} className="mt-0.5 text-orange-600" />
-                          {point}
-                        </li>
-                      ))}
-                    </ul>
-                  </button>
-                );
-              })}
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {(["marinate-menu", "marinate-foodtruck"] as const).map((id) => {
+                  const pkg = PACKAGES[id];
+                  const active = selectedPackage === id;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setSelectedPackage(id)}
+                      className={`rounded-lg border p-4 text-left transition ${active ? "border-orange-500 bg-orange-50/70 shadow-xs" : "border-zinc-200 hover:bg-zinc-50"}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-semibold text-zinc-900">{pkg.label}</h3>
+                        {active && <Check size={18} className="text-orange-600" />}
+                      </div>
+                      <ul className="mt-3 space-y-2 text-sm text-zinc-600">
+                        {pkg.points.map((point) => (
+                          <li key={point} className="flex gap-2">
+                            <Check size={16} className="mt-0.5 text-orange-600 shrink-0" />
+                            <span>{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* + addons toggle */}
+              <div className="flex justify-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAddons((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition border shadow-xs ${
+                    showAddons
+                      ? "bg-zinc-100 text-zinc-700 border-zinc-200 hover:bg-zinc-200"
+                      : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"
+                  }`}
+                >
+                  {showAddons ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      <span>Hide addons</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>addons</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Addon Packages */}
+              {showAddons && (
+                <div className="space-y-3 pt-1 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-3">
+                    <div className="h-px flex-1 bg-orange-100" />
+                    <span className="text-[11px] font-semibold tracking-wider uppercase text-zinc-400">
+                      Additional Packages
+                    </span>
+                    <div className="h-px flex-1 bg-orange-100" />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(["marinate-dinein", "marinate360"] as const).map((id) => {
+                      const pkg = PACKAGES[id];
+                      const active = selectedPackage === id;
+                      return (
+                        <button
+                          key={id}
+                          onClick={() => setSelectedPackage(id)}
+                          className={`rounded-lg border p-4 text-left transition ${active ? "border-orange-500 bg-orange-50/70 shadow-xs" : "border-zinc-200 hover:bg-zinc-50"}`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="font-semibold text-zinc-900">{pkg.label}</h3>
+                            {active && <Check size={18} className="text-orange-600" />}
+                          </div>
+                          <ul className="mt-3 space-y-2 text-sm text-zinc-600">
+                            {pkg.points.map((point) => (
+                              <li key={point} className="flex gap-2">
+                                <Check size={16} className="mt-0.5 text-orange-600 shrink-0" />
+                                <span>{point}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex flex-col gap-2 border-t border-orange-100 bg-orange-50 p-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-zinc-600">Selected: {selected.label}</p>
